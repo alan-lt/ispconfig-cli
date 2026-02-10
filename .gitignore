@@ -1,6 +1,7 @@
 # Environment variables with sensitive credentials
 .env
 .claude
+.DS_Store
 
 # Keep .env.example for reference
 !.env.example
