@@ -6,12 +6,12 @@ require 'soap_functions.php';
 try {
 	initISPConfig();
 
-	$result = getAllWebDomains($sys_userid, $sys_groupid);
+	$result = getAllWebDomains();
 
-	echo $result;
+	echo $result . "\n";
 
 	closeISPConfig();
 
 } catch (Exception $e) {
-	die('Error: ' . $e->getMessage());
+	die('Error: ' . $e->getMessage() . "\n");
 }

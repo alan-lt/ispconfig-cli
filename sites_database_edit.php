@@ -22,10 +22,10 @@ try {
 	$database_id = $arrArg['id'];
 	$result = updateDatabase($database_id, $updates, $client_id);
 
-	echo $result;
+	echo $result . "\n";
 
 	closeISPConfig();
 
 } catch (Exception $e) {
-	die('Error: ' . $e->getMessage());
+	die('Error: ' . $e->getMessage() . "\n");
 }

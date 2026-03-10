@@ -13,10 +13,10 @@ try {
 	$domain_name = $arrArg['domain_name'];
 	$result = getWebDomain(array('domain' => $domain_name));
 
-	echo $result;
+	echo $result . "\n";
 
 	closeISPConfig();
 
 } catch (Exception $e) {
-	die('Error: ' . $e->getMessage());
+	die('Error: ' . $e->getMessage() . "\n");
 }
