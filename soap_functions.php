@@ -873,6 +873,82 @@ function getAllDatabases() {
 
 
 /**
+ * Updates a database record
+ *
+ * @param int $database_id Database ID
+ * @param array $updates Associative array of fields to update
+ * @param int $client_id Client ID (default: 1)
+ * @return string JSON response
+ */
+function updateDatabase($database_id, $updates, $client_id = 0) {
+    global $soap_client, $soap_session_id;
+
+    if (!$soap_client || !$soap_session_id) {
+        return json_encode(array(
+            'success' => false,
+            'error' => 'Not connected. Call initISPConfig() first.'
+        ));
+    }
+
+    try {
+        $database_record = $soap_client->sites_database_get($soap_session_id, $database_id);
+
+        if (!$database_record) {
+            return json_encode(array(
+                'success' => false,
+                'error' => 'Database not found'
+            ));
+        }
+
+        $original_record = $database_record;
+
+        foreach ($updates as $key => $value) {
+            $database_record[$key] = $value;
+        }
+
+        $unexpected_changes = array();
+        foreach ($database_record as $key => $value) {
+            if (isset($updates[$key])) {
+                continue;
+            }
+            if (array_key_exists($key, $original_record) && strval($original_record[$key]) !== strval($value)) {
+                $unexpected_changes[$key] = array(
+                    'original' => $original_record[$key],
+                    'modified' => $value
+                );
+            }
+        }
+
+        if (!empty($unexpected_changes)) {
+            return json_encode(array(
+                'success' => false,
+                'error' => 'Unexpected fields were modified outside of --data',
+                'unexpected_changes' => $unexpected_changes
+            ));
+        }
+
+        $affected_rows = $soap_client->sites_database_update($soap_session_id, $client_id, $database_id, $database_record);
+
+        return json_encode(array(
+            'success' => true,
+            'affected_rows' => $affected_rows,
+            'database_id' => $database_id
+        ));
+
+    } catch (SoapFault $e) {
+        return json_encode(array(
+            'success' => false,
+            'database_id' => $database_id,
+            'error' => $e->getMessage(),
+            'trace' => $soap_client->__getLastResponse()
+        ));
+    }
+}
+
+
+
+
+/**
  * Retrieves information about a web domain
  *
  * @param mixed $identifier Domain ID (int) or array with 'domain' key for name lookup
