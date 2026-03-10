@@ -4,6 +4,34 @@ Command-line interface tools for managing ISPConfig via SOAP API.
 
 > **Disclaimer:** I has extensive experience in system administration and programming. This project is created using vibe-coding with AI assistance as an experiment and to save time. Use at your own risk — always review the code and test in a non-production environment before deploying.
 
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Output Format](#output-format)
+- **System & API**
+  - [get_function_list.php](#get_function_listphp) — list available SOAP API functions
+  - [get_jobqueue_count.php](#get_jobqueue_countphp) — check pending jobs count
+- **Client Management**
+  - [client_get.php](#client_getphp) — get client by ID
+  - [client_get_all.php](#client_get_allphp) — list all clients
+- **Web Domain Management**
+  - [sites_web_domain_add.php](#sites_web_domain_addphp) — create a domain
+  - [sites_web_domain_get.php](#sites_web_domain_getphp) — get domain by name
+  - [sites_web_domain_get_all.php](#sites_web_domain_get_allphp) — list all domains
+  - [sites_web_domain_edit.php](#sites_web_domain_editphp) — update domain settings
+  - [sites_web_domain_delete.php](#sites_web_domain_deletephp) — delete a domain
+- **Database Management**
+  - [sites_database_add.php](#sites_database_addphp) — create a database
+  - [sites_database_get.php](#sites_database_getphp) — get database by ID
+  - [sites_database_get_all.php](#sites_database_get_allphp) — list all databases
+  - [sites_database_edit.php](#sites_database_editphp) — update database settings
+- **Database User Management**
+  - [sites_database_user_add.php](#sites_database_user_addphp) — create a database user
+  - [sites_database_user_get.php](#sites_database_user_getphp) — get database user by ID
+  - [sites_database_user_get_all.php](#sites_database_user_get_allphp) — list all database users
+- [Common Workflows](#common-workflows)
+- [Technical Details](#technical-details)
+
 ## Prerequisites
 
 Before using any of these tools, you must configure your `.env` file with your ISPConfig credentials:
