@@ -7,11 +7,20 @@ if (!isset($arrArg['id'])) {
 	die('--id=<int> not present' . "\n");
 }
 
+if (!isset($arrArg['data'])) {
+	die('--data=\'{"field": "value"}\' not present' . "\n");
+}
+
+$updates = json_decode($arrArg['data'], true);
+if ($updates === null) {
+	die('Error: invalid JSON in --data parameter' . "\n");
+}
+
 try {
 	initISPConfig();
 
 	$domain_id = $arrArg['id'];
-	$result = deleteWebDomain($domain_id);
+	$result = updateWebDomain($domain_id, $updates, $client_id);
 
 	echo $result . "\n";
 

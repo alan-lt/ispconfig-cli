@@ -1,5 +1,6 @@
 # Environment variables with sensitive credentials
 .env
+.git
 .claude
 .vscode
 .DS_Store

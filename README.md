@@ -2,6 +2,8 @@
 
 Command-line interface tools for managing ISPConfig via SOAP API.
 
+> **Disclaimer:** I has extensive experience in system administration and programming. This project is created using vibe-coding with AI assistance as an experiment and to save time. Use at your own risk — always review the code and test in a non-production environment before deploying.
+
 ## Prerequisites
 
 Before using any of these tools, you must configure your `.env` file with your ISPConfig credentials:
@@ -222,9 +224,38 @@ Retrieves detailed information about a specific web domain by domain name.
 
 ---
 
+### sites_web_domain_edit.php
+
+Updates an existing web domain's configuration.
+
+**Usage:**
+```bash
+./sites_web_domain_edit.php --id=<domain_id> --data='{"field": "value"}'
+```
+
+**Example:**
+```bash
+./sites_web_domain_edit.php --id=42 --data='{"php":"php-fpm","rewrite_to_https":"y"}'
+```
+
+**Output:**
+```json
+{
+  "success": true,
+  "affected_rows": 1,
+  "domain_id": 42
+}
+```
+
+**Required Parameters:**
+- `--id`: Domain ID (integer)
+- `--data`: JSON string with fields to update
+
+---
+
 ### sites_web_domain_get_all.php
 
-Retrieves all web domains for the current system user.
+Retrieves all web domains.
 
 **Usage:**
 ```bash
@@ -324,6 +355,35 @@ Creates a new MySQL database in ISPConfig.
 - Daily backups, 2 copies
 - Active: yes
 - Quota: unlimited (-1)
+
+---
+
+### sites_database_edit.php
+
+Updates an existing database's configuration.
+
+**Usage:**
+```bash
+./sites_database_edit.php --id=<database_id> --data='{"field": "value"}'
+```
+
+**Example:**
+```bash
+./sites_database_edit.php --id=15 --data='{"backup_interval":"weekly","backup_copies":3}'
+```
+
+**Output:**
+```json
+{
+  "success": true,
+  "affected_rows": 1,
+  "database_id": 15
+}
+```
+
+**Required Parameters:**
+- `--id`: Database ID (integer)
+- `--data`: JSON string with fields to update
 
 ---
 
@@ -564,8 +624,6 @@ Retrieves information about all database users.
 From `soap_env.php`:
 - `$client_id = 3`: Default client ID
 - `$server_id = 1`: Default server ID
-- `$sys_userid = 4`: Default system user ID
-- `$sys_groupid = 4`: Default system group ID
 
 ### SSL Configuration
 

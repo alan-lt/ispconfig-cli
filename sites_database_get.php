@@ -13,10 +13,10 @@ try {
 	$database_id = $arrArg['id'];
 	$result = getDatabase($database_id);
 
-	echo $result;
+	echo $result . "\n";
 
 	closeISPConfig();
 
 } catch (Exception $e) {
-	die('Error: ' . $e->getMessage());
+	die('Error: ' . $e->getMessage() . "\n");
 }

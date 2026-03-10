@@ -8,12 +8,12 @@ try {
 
 	$result = getAllClients();
 
-	echo $result;
+	echo $result . "\n";
 
 	closeISPConfig();
 
 } catch (Exception $e) {
-	die('Error: ' . $e->getMessage());
+	die('Error: ' . $e->getMessage() . "\n");
 }
 
 ?>

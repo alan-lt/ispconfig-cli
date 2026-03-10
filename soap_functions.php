@@ -949,12 +949,14 @@ function updateDatabase($database_id, $updates, $client_id = 0) {
 
 
 /**
- * Retrieves information about a web domain
+ * Updates a web domain record
  *
- * @param mixed $identifier Domain ID (int) or array with 'domain' key for name lookup
+ * @param int $domain_id Domain ID
+ * @param array $updates Associative array of fields to update
+ * @param int $client_id Client ID (default: 0)
  * @return string JSON response
  */
-function getWebDomain($identifier) {
+function updateWebDomain($domain_id, $updates, $client_id = 0) {
     global $soap_client, $soap_session_id;
 
     if (!$soap_client || !$soap_session_id) {
@@ -965,19 +967,124 @@ function getWebDomain($identifier) {
     }
 
     try {
-        $domain_data = $soap_client->sites_web_domain_get($soap_session_id, $identifier);
+        $domain_record = $soap_client->sites_web_domain_get($soap_session_id, $domain_id);
 
-        if (!$domain_data) {
+        if (!$domain_record) {
             return json_encode(array(
                 'success' => false,
                 'error' => 'Domain not found'
             ));
         }
 
+        $original_record = $domain_record;
+
+        foreach ($updates as $key => $value) {
+            $domain_record[$key] = $value;
+        }
+
+        $unexpected_changes = array();
+        foreach ($domain_record as $key => $value) {
+            if (isset($updates[$key])) {
+                continue;
+            }
+            if (array_key_exists($key, $original_record) && strval($original_record[$key]) !== strval($value)) {
+                $unexpected_changes[$key] = array(
+                    'original' => $original_record[$key],
+                    'modified' => $value
+                );
+            }
+        }
+
+        if (!empty($unexpected_changes)) {
+            return json_encode(array(
+                'success' => false,
+                'error' => 'Unexpected fields were modified outside of --data',
+                'unexpected_changes' => $unexpected_changes
+            ));
+        }
+
+        $affected_rows = $soap_client->sites_web_domain_update($soap_session_id, $client_id, $domain_id, $domain_record);
+
         return json_encode(array(
             'success' => true,
-            'data' => $domain_data
+            'affected_rows' => $affected_rows,
+            'domain_id' => $domain_id
         ));
+
+    } catch (SoapFault $e) {
+        return json_encode(array(
+            'success' => false,
+            'domain_id' => $domain_id,
+            'error' => $e->getMessage(),
+            'trace' => $soap_client->__getLastResponse()
+        ));
+    }
+}
+
+
+
+
+/**
+ * Retrieves information about all web domains
+ *
+ * @return string JSON response
+ */
+function getAllWebDomains() {
+    return getWebDomain('-1');
+}
+
+
+
+
+/**
+ * Retrieves information about a web domain
+ *
+ * @param mixed $domain_id Domain ID (integer) or '-1' for all domains
+ * @return string JSON response
+ */
+function getWebDomain($domain_id) {
+    global $soap_client, $soap_session_id;
+
+    if (!$soap_client || !$soap_session_id) {
+        return json_encode(array(
+            'success' => false,
+            'error' => 'Not connected. Call initISPConfig() first.'
+        ));
+    }
+
+    try {
+        if ($domain_id === '-1' || $domain_id === -1) {
+            $domains = $soap_client->sites_web_domain_get($soap_session_id, array());
+
+            if (!is_array($domains)) {
+                $domains = array();
+            }
+
+            $result = array();
+            foreach ($domains as $domain) {
+                $result[$domain['domain_id']] = $domain;
+            }
+
+            return json_encode(array(
+                'success' => true,
+                'count' => count($result),
+                'domains' => $result
+            ));
+        } else {
+            $domain_data = $soap_client->sites_web_domain_get($soap_session_id, $domain_id);
+
+            if (!$domain_data) {
+                return json_encode(array(
+                    'success' => false,
+                    'error' => 'Domain not found'
+                ));
+            }
+
+            return json_encode(array(
+                'success' => true,
+                'data' => $domain_data
+            ));
+        }
 
     } catch (SoapFault $e) {
         return json_encode(array(
@@ -1032,43 +1139,6 @@ function deleteWebDomain($domain_id)
         return json_encode(array(
             'success' => false,
             'domain_id' => $domain_id,
-            'error' => $e->getMessage()
-        ));
-    }
-}
-
-
-
-
-/**
- * Shows sites of a single user
- *
- * @param int $sys_userid System user ID
- * @param int $sys_groupid System group ID
- * @return string JSON response
- */
-function getAllWebDomains($sys_userid = 1, $sys_groupid = 1) {
-    global $soap_client, $soap_session_id;
-
-    if (!$soap_client || !$soap_session_id) {
-        return json_encode(array(
-            'success' => false,
-            'error' => 'Not connected. Call initISPConfig() first.'
-        ));
-    }
-
-    try {
-        $domains = $soap_client->client_get_sites_by_user($soap_session_id, $sys_userid, $sys_groupid);
-
-        return json_encode(array(
-            'success' => true,
-            'count' => count($domains),
-            'domains' => $domains
-        ));
-
-    } catch (SoapFault $e) {
-        return json_encode(array(
-            'success' => false,
             'error' => $e->getMessage()
         ));
     }
