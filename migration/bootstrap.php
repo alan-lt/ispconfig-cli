@@ -27,6 +27,10 @@ require '../soap_functions.php';
 $soap_client     = null;
 $soap_session_id = null;
 
+// Migration defaults — adjust for your environment
+$client_id = isset($arrArg['client_id']) ? intval($arrArg['client_id']) : 1;
+$server_id = isset($arrArg['server_id']) ? intval($arrArg['server_id']) : 1;
+
 
 try {
     echo "\nISPConfig Migration Bootstrap\n\n";
@@ -50,7 +54,7 @@ try {
 
     // Pre-fetch all existing resources so we can fall back to them if creation fails
     echo "Fetching existing resources - ";
-    $existing_domains   = json_decode(getAllWebDomains($sys_userid, $sys_groupid), true);
+    $existing_domains   = json_decode(getAllWebDomains(), true);
     $existing_db_users  = json_decode(getAllDatabaseUsers(), true);
     $existing_databases = json_decode(getAllDatabasesForClient($client_id), true);
     echo "OK\n";

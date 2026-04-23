@@ -1,5 +1,9 @@
 # Environment variables with sensitive credentials
 .env
+
+# Migration config with real credentials
+migration/config.json
+
 .git
 .claude
 .vscode

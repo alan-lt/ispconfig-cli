@@ -1256,6 +1256,184 @@ function getAllDatabasesForClient($client_id = 1) {
 
 
 /**
+ * Retrieves total database size for all databases linked to a specific web domain
+ *
+ * Fetches databases from API filtered by parent_domain_id.
+ * Gets actual size from information_schema via mysql CLI.
+ *
+ * @param int $domain_id Domain ID (parent_domain_id in database records)
+ * @return string JSON response
+ */
+function getDatabaseSizeByDomain($domain_id) {
+    global $soap_client, $soap_session_id;
+
+    if (!$soap_client || !$soap_session_id) {
+        return json_encode(array(
+            'success' => false,
+            'error' => 'Not connected. Call initISPConfig() first.'
+        ));
+    }
+
+    try {
+        // Verify domain exists
+        $domain = $soap_client->sites_web_domain_get($soap_session_id, $domain_id);
+
+        if (!$domain) {
+            return json_encode(array(
+                'success' => false,
+                'error' => 'Domain not found'
+            ));
+        }
+
+        // Get all databases
+        $all_databases = $soap_client->sites_database_get($soap_session_id, -1);
+
+        if (!is_array($all_databases)) {
+            $all_databases = array();
+        }
+
+        $databases = array();
+        $total_used_mb = 0;
+
+        foreach ($all_databases as $db) {
+            if (intval($db['parent_domain_id']) !== intval($domain_id)) {
+                continue;
+            }
+
+            $db_name = $db['database_name'];
+            $quota = isset($db['database_quota']) ? intval($db['database_quota']) : -1;
+
+            // Get actual size from information_schema
+            $used_mb = getDatabaseSizeFromMysql($db_name);
+
+            $databases[] = array(
+                'database_id'   => $db['database_id'],
+                'database_name' => $db_name,
+                'quota_mb'      => $quota == -1 ? 'unlimited' : $quota,
+                'used_mb'       => $used_mb,
+            );
+
+            $total_used_mb += $used_mb;
+        }
+
+        return json_encode(array(
+            'success'       => true,
+            'domain_id'     => $domain_id,
+            'domain'        => $domain['domain'],
+            'count'         => count($databases),
+            'total_used_mb' => round($total_used_mb, 2),
+            'databases'     => $databases
+        ), JSON_PRETTY_PRINT);
+
+    } catch (SoapFault $e) {
+        return json_encode(array(
+            'success' => false,
+            'error'   => $e->getMessage(),
+            'trace'   => $soap_client->__getLastResponse()
+        ));
+    }
+}
+
+
+
+
+/**
+ * Gets database size in MB from information_schema via mysql CLI
+ *
+ * @param string $database_name Database name
+ * @return float Size in MB
+ */
+function getDatabaseSizeFromMysql($database_name) {
+    $sql = "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) "
+         . "FROM information_schema.tables "
+         . "WHERE table_schema = '" . addslashes($database_name) . "'";
+
+    $output = shell_exec('mysql -N -e ' . escapeshellarg($sql) . ' 2>/dev/null');
+
+    if ($output === null || trim($output) === '' || trim($output) === 'NULL') {
+        return 0;
+    }
+
+    return round(floatval(trim($output)), 2);
+}
+
+
+
+
+/**
+ * Retrieves disk usage for a specific web domain
+ *
+ * Gets domain info from API, then measures actual disk usage via du
+ * on the document_root directory.
+ *
+ * @param int $domain_id Domain ID
+ * @return string JSON response
+ */
+function getDiskUsageByDomain($domain_id) {
+    global $soap_client, $soap_session_id;
+
+    if (!$soap_client || !$soap_session_id) {
+        return json_encode(array(
+            'success' => false,
+            'error' => 'Not connected. Call initISPConfig() first.'
+        ));
+    }
+
+    try {
+        $domain = $soap_client->sites_web_domain_get($soap_session_id, $domain_id);
+
+        if (!$domain) {
+            return json_encode(array(
+                'success' => false,
+                'error' => 'Domain not found'
+            ));
+        }
+
+        $document_root = $domain['document_root'];
+        $hd_quota = intval($domain['hd_quota']);
+
+        // Get actual disk usage via du
+        $used_kb = 0;
+        $source = 'du';
+
+        if (is_dir($document_root)) {
+            $output = shell_exec('du -sk ' . escapeshellarg($document_root) . ' 2>/dev/null');
+            if ($output) {
+                $used_kb = intval(trim(explode("\t", $output)[0]));
+            }
+        }
+
+        $used_mb = round($used_kb / 1024, 2);
+
+        $result = array(
+            'success'        => true,
+            'domain_id'      => $domain_id,
+            'domain'         => $domain['domain'],
+            'document_root'  => $document_root,
+            'hd_quota_mb'    => $hd_quota == -1 ? 'unlimited' : $hd_quota,
+            'hd_used_mb'     => $used_mb,
+            'source'         => $source,
+        );
+
+        if ($hd_quota > 0 && $used_mb > 0) {
+            $result['hd_used_percent'] = round(($used_mb / $hd_quota) * 100, 1);
+        }
+
+        return json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+    } catch (SoapFault $e) {
+        return json_encode(array(
+            'success' => false,
+            'error' => $e->getMessage(),
+            'trace' => $soap_client->__getLastResponse()
+        ));
+    }
+}
+
+
+
+
+/**
  * Load environment variables from .env file
  *
  * @param string $file Path to .env file

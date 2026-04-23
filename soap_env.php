@@ -11,12 +11,6 @@ $soap_uri      = getenv('SOAP_URI');
 
 $soap_client_trace = 0;
 
-// ispconfig current default id's
-$client_id = 3;
-$server_id = 1;
-//$sys_userid = 4;
-//$sys_groupid = 4;
-
 $context = stream_context_create([
     'ssl' => [
         'verify_peer' => false,
