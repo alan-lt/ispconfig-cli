@@ -1,0 +1,37 @@
+#!/usr/bin/php
+<?php
+
+/*
+Usage:
+  ./sites_web_domain_database_usage.php --domain_name=domain.tld
+  ./sites_web_domain_database_usage.php --domain_id=5
+*/
+
+require 'soap_functions.php';
+
+if (!isset($arrArg['domain_name']) && !isset($arrArg['domain_id'])) {
+	die('--domain_name=domain.tld or --domain_id=<int> not present' . "\n");
+}
+
+try {
+	initISPConfig();
+
+	if (isset($arrArg['domain_name'])) {
+		$domain_data = json_decode(getWebDomain(array('domain' => $arrArg['domain_name'])), true);
+		if (!$domain_data['success'] || empty($domain_data['data'])) {
+			die('Error: Domain not found' . "\n");
+		}
+		$domain_id = intval($domain_data['data'][0]['domain_id']);
+	} else {
+		$domain_id = intval($arrArg['domain_id']);
+	}
+
+	$result = getDatabaseSizeByDomain($domain_id);
+
+	echo $result . "\n";
+
+	closeISPConfig();
+
+} catch (Exception $e) {
+	die('Error: ' . $e->getMessage() . "\n");
+}

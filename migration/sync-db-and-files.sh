@@ -11,11 +11,11 @@
 #DOMAIN='mydomain.com'
 
 # Source server credentials (change these to match your environment)
-MYSQL_HOST='10.0.0.123'
+MYSQL_HOST='source-server-ip'
 MYSQL_USER='mysql_ro_user'
 MYSQL_PASS='mysql_ro_pass'
 
-SSH_HOST='10.0.0.123'
+SSH_HOST='source-server-ip'
 SSH_USER='ssh_ro_user'
 
 

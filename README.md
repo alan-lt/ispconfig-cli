@@ -20,6 +20,8 @@ Command-line interface tools for managing ISPConfig via SOAP API.
   - [sites_web_domain_get_all.php](#sites_web_domain_get_allphp) — list all domains
   - [sites_web_domain_edit.php](#sites_web_domain_editphp) — update domain settings
   - [sites_web_domain_delete.php](#sites_web_domain_deletephp) — delete a domain
+  - [sites_web_domain_disk_usage.php](#sites_web_domain_disk_usagephp) — get disk usage for a domain
+  - [sites_web_domain_database_usage.php](#sites_web_domain_database_usagephp) — get database size for a domain
 - **Database Management**
   - [sites_database_add.php](#sites_database_addphp) — create a database
   - [sites_database_get.php](#sites_database_getphp) — get database by ID
@@ -344,6 +346,66 @@ Deletes a web domain from ISPConfig.
 
 ---
 
+### sites_web_domain_disk_usage.php
+
+Retrieves disk usage for a web domain by measuring its document root with `du`.
+
+**Usage:**
+```bash
+./sites_web_domain_disk_usage.php --domain_name=example.com
+./sites_web_domain_disk_usage.php --domain_id=5
+```
+
+**Output:**
+```json
+{
+    "success": true,
+    "domain_id": 5,
+    "domain": "example.com",
+    "document_root": "/var/www/clients/client1/web5",
+    "hd_quota_mb": "unlimited",
+    "hd_used_mb": 640.01,
+    "source": "du"
+}
+```
+
+**Note:** Must be run on the server where the domain is hosted.
+
+---
+
+### sites_web_domain_database_usage.php
+
+Retrieves total database size for all databases linked to a web domain. Gets actual size from `information_schema`.
+
+**Usage:**
+```bash
+./sites_web_domain_database_usage.php --domain_name=example.com
+./sites_web_domain_database_usage.php --domain_id=5
+```
+
+**Output:**
+```json
+{
+    "success": true,
+    "domain_id": 5,
+    "domain": "example.com",
+    "count": 1,
+    "total_used_mb": 5.45,
+    "databases": [
+        {
+            "database_id": "15",
+            "database_name": "c1mydb",
+            "quota_mb": "unlimited",
+            "used_mb": 5.45
+        }
+    ]
+}
+```
+
+**Note:** Must be run on the server where MySQL is hosted (uses `mysql` CLI).
+
+---
+
 ## Database Management
 
 ### sites_database_add.php
@@ -646,12 +708,6 @@ Retrieves information about all database users.
 - **soap_env.php**: Environment configuration and variable initialization
 - **soap_functions.php**: Core SOAP client library with all API wrapper functions
 - **CLI scripts**: Individual command-line tools that use the function library
-
-### Default Configuration Values
-
-From `soap_env.php`:
-- `$client_id = 3`: Default client ID
-- `$server_id = 1`: Default server ID
 
 ### SSL Configuration
 
