@@ -1293,7 +1293,7 @@ function getDatabaseSizeByDomain($domain_id) {
         }
 
         $databases = array();
-        $total_used_mb = 0;
+        $total_used_bytes = 0;
 
         foreach ($all_databases as $db) {
             if (intval($db['parent_domain_id']) !== intval($domain_id)) {
@@ -1304,25 +1304,25 @@ function getDatabaseSizeByDomain($domain_id) {
             $quota = isset($db['database_quota']) ? intval($db['database_quota']) : -1;
 
             // Get actual size from information_schema
-            $used_mb = getDatabaseSizeFromMysql($db_name);
+            $used_bytes = getDatabaseSizeFromMysql($db_name);
 
             $databases[] = array(
                 'database_id'   => $db['database_id'],
                 'database_name' => $db_name,
-                'quota_mb'      => $quota == -1 ? 'unlimited' : $quota,
-                'used_mb'       => $used_mb,
+                'quota_bytes'   => $quota == -1 ? 'unlimited' : $quota * 1024 * 1024,
+                'used_bytes'    => $used_bytes,
             );
 
-            $total_used_mb += $used_mb;
+            $total_used_bytes += $used_bytes;
         }
 
         return json_encode(array(
-            'success'       => true,
-            'domain_id'     => $domain_id,
-            'domain'        => $domain['domain'],
-            'count'         => count($databases),
-            'total_used_mb' => round($total_used_mb, 2),
-            'databases'     => $databases
+            'success'          => true,
+            'domain_id'        => $domain_id,
+            'domain'           => $domain['domain'],
+            'count'            => count($databases),
+            'total_used_bytes' => $total_used_bytes,
+            'databases'        => $databases
         ), JSON_PRETTY_PRINT);
 
     } catch (SoapFault $e) {
@@ -1338,13 +1338,13 @@ function getDatabaseSizeByDomain($domain_id) {
 
 
 /**
- * Gets database size in MB from information_schema via mysql CLI
+ * Gets database size in bytes from information_schema via mysql CLI
  *
  * @param string $database_name Database name
- * @return float Size in MB
+ * @return int Size in bytes
  */
 function getDatabaseSizeFromMysql($database_name) {
-    $sql = "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) "
+    $sql = "SELECT IFNULL(SUM(data_length + index_length), 0) "
          . "FROM information_schema.tables "
          . "WHERE table_schema = '" . addslashes($database_name) . "'";
 
@@ -1354,7 +1354,7 @@ function getDatabaseSizeFromMysql($database_name) {
         return 0;
     }
 
-    return round(floatval(trim($output)), 2);
+    return intval(trim($output));
 }
 
 
@@ -1393,30 +1393,28 @@ function getDiskUsageByDomain($domain_id) {
         $hd_quota = intval($domain['hd_quota']);
 
         // Get actual disk usage via du
-        $used_kb = 0;
+        $used_bytes = 0;
         $source = 'du';
 
         if (is_dir($document_root)) {
-            $output = shell_exec('du -sk ' . escapeshellarg($document_root) . ' 2>/dev/null');
+            $output = shell_exec('du -sb ' . escapeshellarg($document_root) . ' 2>/dev/null');
             if ($output) {
-                $used_kb = intval(trim(explode("\t", $output)[0]));
+                $used_bytes = intval(trim(explode("\t", $output)[0]));
             }
         }
 
-        $used_mb = round($used_kb / 1024, 2);
-
         $result = array(
-            'success'        => true,
-            'domain_id'      => $domain_id,
-            'domain'         => $domain['domain'],
-            'document_root'  => $document_root,
-            'hd_quota_mb'    => $hd_quota == -1 ? 'unlimited' : $hd_quota,
-            'hd_used_mb'     => $used_mb,
-            'source'         => $source,
+            'success'         => true,
+            'domain_id'       => $domain_id,
+            'domain'          => $domain['domain'],
+            'document_root'   => $document_root,
+            'hd_quota_bytes'  => $hd_quota == -1 ? 'unlimited' : $hd_quota * 1024 * 1024,
+            'hd_used_bytes'   => $used_bytes,
+            'source'          => $source,
         );
 
-        if ($hd_quota > 0 && $used_mb > 0) {
-            $result['hd_used_percent'] = round(($used_mb / $hd_quota) * 100, 1);
+        if ($hd_quota > 0 && $used_bytes > 0) {
+            $result['hd_used_percent'] = round(($used_bytes / ($hd_quota * 1024 * 1024)) * 100, 1);
         }
 
         return json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
