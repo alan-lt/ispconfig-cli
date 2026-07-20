@@ -31,6 +31,9 @@ Command-line interface tools for managing ISPConfig via SOAP API.
   - [sites_database_user_add.php](#sites_database_user_addphp) — create a database user
   - [sites_database_user_get.php](#sites_database_user_getphp) — get database user by ID
   - [sites_database_user_get_all.php](#sites_database_user_get_allphp) — list all database users
+- **Web Server Config**
+  - [directive_snippets_get_all.php](#directive_snippets_get_allphp) — list all directive snippets (apache/nginx/php templates)
+  - [sites_web_domain_directive_snippet_set.php](#sites_web_domain_directive_snippet_setphp) — assign a directive snippet to a web domain
 - [Common Workflows](#common-workflows)
 - [Technical Details](#technical-details)
 
@@ -53,6 +56,10 @@ All commands return JSON-formatted output with the following structure:
 - `success`: Boolean indicating if the operation succeeded
 - `data` or specific result fields: The actual response data
 - `error`: Error message (only present if success is false)
+
+### `--help`
+
+Besides usage, it returns the default values for those scripts — the effective `--data` JSON, read live from ISPConfig's form definition (so it stays correct across updates) — which you can override with `--data='<json>'`.
 
 ---
 
@@ -190,12 +197,17 @@ Creates a new web domain (website) in ISPConfig.
 
 **Usage:**
 ```bash
-./sites_web_domain_add.php --domain=<domain.tld>
+./sites_web_domain_add.php --domain=<domain.tld> [--data='<json>']
 ```
 
-**Example:**
+**Examples:**
 ```bash
+# Minimal
 ./sites_web_domain_add.php --domain=example.com
+
+# With SSL (Let's Encrypt) and a directive snippet, in one command
+./sites_web_domain_add.php --domain=example.com \
+  --data='{"ssl_letsencrypt":"y","directive_snippets_id":2}'
 ```
 
 **Output:**
@@ -203,7 +215,13 @@ Creates a new web domain (website) in ISPConfig.
 {
   "success": true,
   "domain_id": 42,
-  "domain": "example.com"
+  "domain": "example.com",
+  "directive_snippet": {
+    "success": true,
+    "domain_id": 42,
+    "directive_snippets_id": 2,
+    "name": "example nginx config"
+  }
 }
 ```
 
@@ -216,6 +234,9 @@ Creates a new web domain (website) in ISPConfig.
 - Subdomain: www
 - Daily backups, 2 copies
 - Traffic/disk quota: unlimited (-1)
+
+Run `--help` to see the full effective default `--data` JSON. Any field can be
+overridden via `--data` (see [`--help`](#--help)).
 
 ---
 
@@ -263,9 +284,16 @@ Updates an existing web domain's configuration.
 ./sites_web_domain_edit.php --id=<domain_id> --data='{"field": "value"}'
 ```
 
-**Example:**
+**Examples:**
 ```bash
+# Update plain fields
 ./sites_web_domain_edit.php --id=42 --data='{"php":"php-fpm","rewrite_to_https":"y"}'
+
+# Enable SSL (Let's Encrypt) — turns on the full SSL setup
+./sites_web_domain_edit.php --id=42 --data='{"ssl_letsencrypt":"y"}'
+
+# Assign / remove a directive snippet (0 = remove)
+./sites_web_domain_edit.php --id=42 --data='{"directive_snippets_id":2}'
 ```
 
 **Output:**
@@ -280,6 +308,8 @@ Updates an existing web domain's configuration.
 **Required Parameters:**
 - `--id`: Domain ID (integer)
 - `--data`: JSON string with fields to update
+
+Run `--help` to see the available fields and their defaults.
 
 ---
 
@@ -414,7 +444,7 @@ Creates a new MySQL database in ISPConfig.
 
 **Usage:**
 ```bash
-./sites_database_add.php --database_name=<name> --database_user_id=<id> --domain_id=<id>
+./sites_database_add.php --database_name=<name> --database_user_id=<id> --domain_id=<id> [--data='<json>']
 ```
 
 **Example:**
@@ -550,7 +580,7 @@ Creates a new database user in ISPConfig.
 
 **Usage:**
 ```bash
-./sites_database_user_add.php --user=<username> --password=<password>
+./sites_database_user_add.php --user=<username> --password=<password> [--data='<json>']
 ```
 
 **Example:**
@@ -639,14 +669,94 @@ Retrieves information about all database users.
 
 ---
 
+## Web Server Config
+
+### directive_snippets_get_all.php
+
+Lists all directive snippets (Apache / nginx / PHP config templates) defined in
+ISPConfig. Web domains reference a snippet through their `directive_snippets_id`
+field. There is no SOAP API function for directive snippets, so this reads them
+directly from the local ISPConfig database via the `mysql` CLI.
+
+**Usage:**
+```bash
+./directive_snippets_get_all.php
+```
+
+**Output:**
+```json
+{
+  "success": true,
+  "count": 2,
+  "snippets": [
+    {
+      "directive_snippets_id": 1,
+      "name": "example php config",
+      "type": "php",
+      "active": "y"
+    },
+    {
+      "directive_snippets_id": 2,
+      "name": "example nginx config",
+      "type": "nginx",
+      "active": "y"
+    }
+  ]
+}
+```
+
+**Note:** Must be run on the server where the ISPConfig database is hosted (uses the `mysql` CLI).
+
+---
+
+### sites_web_domain_directive_snippet_set.php
+
+Assigns a directive snippet (nginx / Apache / PHP template) to a web domain.
+
+`directive_snippets_id` is a UI-plugin field that the SOAP API cannot set (it is
+silently ignored on both add and update). This script uses ISPConfig's own
+interface database layer (`datalogUpdate`) to update the column and queue the
+vhost rebuild — exactly what the control panel does when an admin picks a snippet
+and saves the website. The snippet must be active, customer-viewable and match the
+server's web type (e.g. an `nginx` snippet on an nginx server).
+
+**Usage:**
+```bash
+./sites_web_domain_directive_snippet_set.php --domain_id=42 --snippet_id=2
+./sites_web_domain_directive_snippet_set.php --domain_id=42 --snippet_name="example nginx config"
+```
+
+**Output:**
+```json
+{
+  "success": true,
+  "domain_id": 42,
+  "directive_snippets_id": 2,
+  "name": "example nginx config"
+}
+```
+
+**Required Parameters:**
+- `--domain_id`: Web domain ID
+- `--snippet_id` or `--snippet_name`: Which snippet to assign (`--snippet_id=0` removes it)
+
+**Note:** Must be run on the ISPConfig server (uses the local interface library and database).
+
+**Tip:** `sites_web_domain_add.php` and `sites_web_domain_edit.php` can also assign
+a snippet inline via `--data='{"directive_snippets_id":<id>}'` (they call the same
+logic), so a separate command is usually not needed.
+
+---
+
 ## Common Workflows
 
 ### Creating a Complete Website with Database
 
 ```bash
-# 1. Add the web domain
-./sites_web_domain_add.php --domain=newsite.com
-# Output: {"success":true,"domain_id":42,"domain":"newsite.com"}
+# 1. Add the web domain (optionally with SSL + a directive snippet in one go)
+./sites_web_domain_add.php --domain=newsite.com \
+  --data='{"ssl_letsencrypt":"y","directive_snippets_id":2}'
+# Output: {"success":true,"domain_id":42,"domain":"newsite.com",...}
 # Save the domain_id (42) for later steps
 
 # 2. Create a database user
@@ -707,6 +817,9 @@ Retrieves information about all database users.
 
 - **soap_env.php**: Environment configuration and variable initialization
 - **soap_functions.php**: Core SOAP client library with all API wrapper functions
+- **ispconfig_interface.php**: Bootstraps ISPConfig's interface library for the few
+  operations the SOAP API cannot do (directive snippets, reading live form defaults
+  for `--help`); required only by scripts that need it, and only on the ISPConfig server
 - **CLI scripts**: Individual command-line tools that use the function library
 
 ### SSL Configuration

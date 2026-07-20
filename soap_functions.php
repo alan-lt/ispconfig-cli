@@ -180,6 +180,30 @@ function getAllClients($detailed = true) {
 
 
 /**
+ * Expands the simplified SSL config, shared by add and update: setting
+ * ssl_letsencrypt = 'y' turns on the whole SSL setup (ssl, ssl_domain and the
+ * https redirect), so the caller only has to enable Let's Encrypt.
+ *
+ * @param array  $config Domain configuration / update fields
+ * @param string $domain Fallback domain for ssl_domain (used on update, where
+ *                       the domain name is not part of the update fields)
+ * @return array Config with the SSL fields expanded
+ */
+function applySslConfig($config, $domain = '') {
+    if (isset($config['ssl_letsencrypt']) && $config['ssl_letsencrypt'] === 'y') {
+        $config['ssl'] = 'y';
+        if (empty($config['ssl_domain'])) {
+            $config['ssl_domain'] = (isset($config['domain']) && $config['domain'] !== '') ? $config['domain'] : $domain;
+        }
+        $config['rewrite_to_https'] = 'y';
+    }
+    return $config;
+}
+
+
+
+
+/**
  * Adds a new web domain
  *
  * @param array $config Domain configuration
@@ -198,6 +222,11 @@ function addWebDomain($config) {
     try {
         $client_id = isset($config['client_id']) ? $config['client_id'] : 1;
         unset($config['client_id']);
+
+        // directive_snippets_id cannot be set via SOAP; apply it after create through
+        // the interface library (bootstrapped globally in soap_env.php).
+        $snippet_id = array_key_exists('directive_snippets_id', $config) ? $config['directive_snippets_id'] : null;
+        unset($config['directive_snippets_id']);
 
         $defaults = array(
             'server_id'               => 1,
@@ -227,10 +256,9 @@ function addWebDomain($config) {
             'backup_excludes'         => 'private,tmp,web,log',
             'log_retention'           => 10,
             'server_php_id'           => 2,
-            'directive_snippets_id'   => 0,
         );
 
-        $params = array_merge($defaults, $config);
+        $params = applySslConfig(array_merge($defaults, $config));
 
         $domain_id = $soap_client->sites_web_domain_add(
             $soap_session_id,
@@ -239,11 +267,20 @@ function addWebDomain($config) {
             false
         );
 
-        return json_encode(array(
+        $response = array(
             'success'   => true,
             'domain_id' => $domain_id,
             'domain'    => $params['domain'],
-        ));
+        );
+
+        if ($snippet_id !== null) {
+            $response['directive_snippet'] = setDirectiveSnippet($domain_id, $snippet_id, null);
+            if (empty($response['directive_snippet']['success'])) {
+                $response['success'] = false;
+            }
+        }
+
+        return json_encode($response);
 
     } catch (SoapFault $e) {
         return json_encode(array(
@@ -967,49 +1004,64 @@ function updateWebDomain($domain_id, $updates, $client_id = 0) {
     }
 
     try {
-        $domain_record = $soap_client->sites_web_domain_get($soap_session_id, $domain_id);
+        // directive_snippets_id cannot be set via SOAP; apply it after the update
+        // through the interface library (bootstrapped globally in soap_env.php).
+        $snippet_id = array_key_exists('directive_snippets_id', $updates) ? $updates['directive_snippets_id'] : null;
+        unset($updates['directive_snippets_id']);
 
-        if (!$domain_record) {
-            return json_encode(array(
-                'success' => false,
-                'error' => 'Domain not found'
-            ));
-        }
+        $response = array('success' => true, 'domain_id' => $domain_id);
 
-        $original_record = $domain_record;
+        // Only touch SOAP when there are real fields to change (a snippet-only edit skips it)
+        if (!empty($updates)) {
+            $domain_record = $soap_client->sites_web_domain_get($soap_session_id, $domain_id);
 
-        foreach ($updates as $key => $value) {
-            $domain_record[$key] = $value;
-        }
-
-        $unexpected_changes = array();
-        foreach ($domain_record as $key => $value) {
-            if (isset($updates[$key])) {
-                continue;
+            if (!$domain_record) {
+                return json_encode(array(
+                    'success' => false,
+                    'error' => 'Domain not found'
+                ));
             }
-            if (array_key_exists($key, $original_record) && strval($original_record[$key]) !== strval($value)) {
-                $unexpected_changes[$key] = array(
-                    'original' => $original_record[$key],
-                    'modified' => $value
-                );
+
+            $updates = applySslConfig($updates, isset($domain_record['domain']) ? $domain_record['domain'] : '');
+
+            $original_record = $domain_record;
+
+            foreach ($updates as $key => $value) {
+                $domain_record[$key] = $value;
+            }
+
+            $unexpected_changes = array();
+            foreach ($domain_record as $key => $value) {
+                if (isset($updates[$key])) {
+                    continue;
+                }
+                if (array_key_exists($key, $original_record) && strval($original_record[$key]) !== strval($value)) {
+                    $unexpected_changes[$key] = array(
+                        'original' => $original_record[$key],
+                        'modified' => $value
+                    );
+                }
+            }
+
+            if (!empty($unexpected_changes)) {
+                return json_encode(array(
+                    'success' => false,
+                    'error' => 'Unexpected fields were modified outside of --data',
+                    'unexpected_changes' => $unexpected_changes
+                ));
+            }
+
+            $response['affected_rows'] = $soap_client->sites_web_domain_update($soap_session_id, $client_id, $domain_id, $domain_record);
+        }
+
+        if ($snippet_id !== null) {
+            $response['directive_snippet'] = setDirectiveSnippet($domain_id, $snippet_id, null);
+            if (empty($response['directive_snippet']['success'])) {
+                $response['success'] = false;
             }
         }
 
-        if (!empty($unexpected_changes)) {
-            return json_encode(array(
-                'success' => false,
-                'error' => 'Unexpected fields were modified outside of --data',
-                'unexpected_changes' => $unexpected_changes
-            ));
-        }
-
-        $affected_rows = $soap_client->sites_web_domain_update($soap_session_id, $client_id, $domain_id, $domain_record);
-
-        return json_encode(array(
-            'success' => true,
-            'affected_rows' => $affected_rows,
-            'domain_id' => $domain_id
-        ));
+        return json_encode($response);
 
     } catch (SoapFault $e) {
         return json_encode(array(
@@ -1426,6 +1478,177 @@ function getDiskUsageByDomain($domain_id) {
             'trace' => $soap_client->__getLastResponse()
         ));
     }
+}
+
+
+
+
+/**
+ * Lists web directive snippets from the ISPConfig database.
+ *
+ * There is no SOAP API function for directive snippets, so this reads them
+ * directly from the local ISPConfig database via the mysql CLI (same approach
+ * as the database size functions above).
+ *
+ * @return string JSON response
+ */
+function getDirectiveSnippets() {
+    $sql = "SELECT directive_snippets_id, name, type, active "
+         . "FROM dbispconfig.directive_snippets "
+         . "ORDER BY directive_snippets_id";
+
+    $output = shell_exec('mysql -N -e ' . escapeshellarg($sql) . ' 2>/dev/null');
+
+    if ($output === null) {
+        return json_encode(array(
+            'success' => false,
+            'error'   => 'Failed to query directive_snippets'
+        ));
+    }
+
+    $snippets = array();
+    foreach (explode("\n", trim($output)) as $line) {
+        if ($line === '') {
+            continue;
+        }
+        $cols = explode("\t", $line);
+        $snippets[] = array(
+            'directive_snippets_id' => intval($cols[0]),
+            'name'                  => isset($cols[1]) ? $cols[1] : '',
+            'type'                  => isset($cols[2]) ? $cols[2] : '',
+            'active'                => isset($cols[3]) ? $cols[3] : '',
+        );
+    }
+
+    return json_encode(array(
+        'success'  => true,
+        'count'    => count($snippets),
+        'snippets' => $snippets
+    ));
+}
+
+
+
+
+/**
+ * Assigns a directive snippet (nginx/apache/php template) to a web domain.
+ *
+ * directive_snippets_id is a UI-plugin field that the SOAP API silently ignores
+ * (on both add and update), so this uses ISPConfig's own interface library
+ * (datalogUpdate) to update the column and queue the vhost rebuild - exactly what
+ * the panel does. A raw SQL UPDATE would change the value but not rebuild the vhost.
+ *
+ * Relies on the interface library, which soap_env.php bootstraps for every script.
+ *
+ * Pass either $snippet_id or $snippet_name. Pass $snippet_id = 0 to clear the
+ * assignment (domain uses no directive snippet).
+ *
+ * @param int         $domain_id    Web domain ID
+ * @param int|null    $snippet_id   Directive snippet ID (0 clears the assignment)
+ * @param string|null $snippet_name Directive snippet name
+ * @return array Result array with 'success' plus details, or 'error' on failure
+ */
+function setDirectiveSnippet($domain_id, $snippet_id = null, $snippet_name = null) {
+    global $app;
+
+    if (!isset($app) || !is_object($app)) {
+        return array('success' => false, 'error' => 'ISPConfig interface library not bootstrapped');
+    }
+
+    $domain_id = intval($domain_id);
+
+    $domain = $app->db->queryOneRecord('SELECT domain_id, server_id FROM web_domain WHERE domain_id = ?', $domain_id);
+    if (!$domain) {
+        return array('success' => false, 'error' => 'Domain not found');
+    }
+
+    // snippet_id = 0 clears the assignment (domain uses no directive snippet)
+    if ($snippet_name === null && $snippet_id !== null && intval($snippet_id) === 0) {
+        $app->db->datalogUpdate('web_domain', array('directive_snippets_id' => 0), 'domain_id', $domain_id);
+        return array(
+            'success'               => true,
+            'domain_id'             => $domain_id,
+            'directive_snippets_id' => 0,
+            'name'                  => '',
+        );
+    }
+
+    // Only snippets that match this server's web type, active and customer-viewable are valid
+    $web_config  = $app->getconf->get_server_config($domain['server_id'], 'web');
+    $server_type = $web_config['server_type'];
+
+    if ($snippet_id !== null) {
+        $snippet = $app->db->queryOneRecord("SELECT directive_snippets_id, name, type FROM directive_snippets WHERE directive_snippets_id = ? AND active = 'y' AND customer_viewable = 'y'", intval($snippet_id));
+    } else {
+        $snippet = $app->db->queryOneRecord("SELECT directive_snippets_id, name, type FROM directive_snippets WHERE name = ? AND active = 'y' AND customer_viewable = 'y'", $snippet_name);
+    }
+
+    if (!$snippet) {
+        return array('success' => false, 'error' => 'Snippet not found, inactive or not customer-viewable');
+    }
+    if ($snippet['type'] !== $server_type) {
+        return array('success' => false, 'error' => "Snippet type '" . $snippet['type'] . "' does not match server web type '" . $server_type . "'");
+    }
+
+    // Update the column and queue the vhost rebuild through ISPConfig's own datalog layer
+    $app->db->datalogUpdate('web_domain', array('directive_snippets_id' => $snippet['directive_snippets_id']), 'domain_id', $domain_id);
+
+    return array(
+        'success'               => true,
+        'domain_id'             => $domain_id,
+        'directive_snippets_id' => intval($snippet['directive_snippets_id']),
+        'name'                  => $snippet['name'],
+    );
+}
+
+
+
+
+/**
+ * Extracts the default field values ISPConfig applies to a new record, read live
+ * from the module's tform definition. Used by the --help of the --data scripts so
+ * the shown defaults stay correct across ISPConfig updates (the definition, not a
+ * hard-coded copy, is the source of truth).
+ *
+ * Relies on the interface library, which soap_env.php bootstraps for every script.
+ *
+ * @param string $form_key Which form to read; all tform paths are mapped here,
+ *                         so callers pass a key (e.g. 'WEB_DOMAIN_TFORM')
+ * @return array field => default value
+ */
+function getFormDefaults($form_key) {
+    global $app, $conf;
+
+    // All ISPConfig form definitions used by the --data scripts, in one place.
+    $tforms = array(
+        'WEB_DOMAIN_TFORM'    => '/usr/local/ispconfig/interface/web/sites/form/web_vhost_domain.tform.php',
+        'DATABASE_TFORM'      => '/usr/local/ispconfig/interface/web/sites/form/database.tform.php',
+        'DATABASE_USER_TFORM' => '/usr/local/ispconfig/interface/web/sites/form/database_user.tform.php',
+    );
+
+    if (!isset($tforms[$form_key]) || !is_file($tforms[$form_key])) {
+        return array();
+    }
+
+    // The tform file populates $form; it runs in this scope, so keep it local.
+    $form = array();
+    include $tforms[$form_key];
+
+    $defaults = array();
+    if (isset($form['tabs']) && is_array($form['tabs'])) {
+        foreach ($form['tabs'] as $tab) {
+            if (empty($tab['fields']) || !is_array($tab['fields'])) {
+                continue;
+            }
+            foreach ($tab['fields'] as $field => $def) {
+                if (is_array($def) && array_key_exists('default', $def)) {
+                    $defaults[$field] = $def['default'];
+                }
+            }
+        }
+    }
+
+    return $defaults;
 }
 
 
