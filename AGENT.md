@@ -24,3 +24,12 @@
 - `soap_env.php` — connection config and env loading
 - `*.php` — CLI scripts, one per action
 - CLI scripts are thin: parse args, call function, print result
+
+## Testing & Docs
+
+Before finishing any change:
+
+- Run the test suite and make sure it passes: `./tests/run.sh`
+- When adding testable (pure) logic, add a case to `tests/unit_functions.php`.
+- After changing anything in `soap_functions.php`, regenerate the function reference:
+  `./functions_help.php --markdown > README-FUNCTIONS.md`
