@@ -43,7 +43,6 @@ $config = array(
 	'backup_format_db'        => 'gzip',
 	'backup_excludes'         => 'private,tmp,web,log',
 	'log_retention'           => 10,
-	'server_php_id'           => 2,
 );
 
 // Optional --data JSON overrides/extends the default settings above

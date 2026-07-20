@@ -204,6 +204,29 @@ function applySslConfig($config, $domain = '') {
 
 
 /**
+ * Resolves a PHP version name (e.g. "PHP 8.2") to its server_php_id on a given
+ * server. IDs differ per server, so a version is selected by name and looked up
+ * live here. Relies on the interface library (bootstrapped in soap_env.php).
+ *
+ * @param string $php_version PHP version name as shown in ISPConfig (e.g. "PHP 8.2")
+ * @param int    $server_id   Server the domain lives on
+ * @return int|null server_php_id, or null if no such version on that server
+ */
+function resolveServerPhpId($php_version, $server_id) {
+    global $app;
+
+    $rec = $app->db->queryOneRecord(
+        "SELECT server_php_id FROM server_php WHERE name = ? AND server_id = ?",
+        $php_version, intval($server_id)
+    );
+
+    return $rec ? intval($rec['server_php_id']) : null;
+}
+
+
+
+
+/**
  * Adds a new web domain
  *
  * @param array $config Domain configuration
@@ -255,10 +278,24 @@ function addWebDomain($config) {
             'backup_format_db'        => 'gzip',
             'backup_excludes'         => 'private,tmp,web,log',
             'log_retention'           => 10,
-            'server_php_id'           => 2,
+            'server_php_id'           => 0,
         );
 
         $params = applySslConfig(array_merge($defaults, $config));
+
+        // php_version (e.g. "PHP 8.2") selects the PHP version by name; resolve it to
+        // this server's server_php_id (ids differ per server).
+        if (isset($params['php_version']) && $params['php_version'] !== '') {
+            $php_id = resolveServerPhpId($params['php_version'], $params['server_id']);
+            if ($php_id === null) {
+                return json_encode(array(
+                    'success' => false,
+                    'error'   => "Unknown php_version '" . $params['php_version'] . "' on server_id " . $params['server_id']
+                ));
+            }
+            $params['server_php_id'] = $php_id;
+        }
+        unset($params['php_version']);
 
         $domain_id = $soap_client->sites_web_domain_add(
             $soap_session_id,
@@ -1021,6 +1058,20 @@ function updateWebDomain($domain_id, $updates, $client_id = 0) {
                     'error' => 'Domain not found'
                 ));
             }
+
+            // php_version (e.g. "PHP 8.2") selects the PHP version by name; resolve it to
+            // this server's server_php_id (ids differ per server).
+            if (isset($updates['php_version']) && $updates['php_version'] !== '') {
+                $php_id = resolveServerPhpId($updates['php_version'], $domain_record['server_id']);
+                if ($php_id === null) {
+                    return json_encode(array(
+                        'success' => false,
+                        'error'   => "Unknown php_version '" . $updates['php_version'] . "' on server_id " . $domain_record['server_id']
+                    ));
+                }
+                $updates['server_php_id'] = $php_id;
+            }
+            unset($updates['php_version']);
 
             $updates = applySslConfig($updates, isset($domain_record['domain']) ? $domain_record['domain'] : '');
 
