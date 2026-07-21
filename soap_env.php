@@ -26,4 +26,7 @@ $context = stream_context_create([
 // Always bootstrap the ISPConfig interface library so functions that need it
 // (directive snippets, live form defaults) work without per-script setup. This
 // means every script must run on the ISPConfig server itself.
-require __DIR__ . '/ispconfig_interface.php';
+// Tests set ISPCONFIG_SKIP_BOOTSTRAP=1 to load the functions without a server.
+if (getenv('ISPCONFIG_SKIP_BOOTSTRAP') !== '1') {
+    require __DIR__ . '/ispconfig_interface.php';
+}

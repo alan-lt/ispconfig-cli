@@ -370,6 +370,42 @@ function getJobQueueCount($server_id = 1) {
 
 
 /**
+ * Groups SOAP function names by category (the part before the first "_").
+ * Pure helper for getFunctionList.
+ *
+ * @param array $functions Sorted list of function names
+ * @return array ['categories' => [cat => names[]], 'category_counts' => [cat => n]]
+ */
+function categorizeFunctions($functions) {
+    $categories = array();
+    foreach ($functions as $func) {
+        $parts = explode('_', $func, 2);
+        $category = $parts[0];
+
+        if (empty($category) || !isset($parts[1])) {
+            continue;
+        }
+
+        if (!isset($categories[$category])) {
+            $categories[$category] = array();
+        }
+        $categories[$category][] = $func;
+    }
+
+    ksort($categories);
+
+    $category_counts = array();
+    foreach ($categories as $cat => $funcs) {
+        $category_counts[$cat] = count($funcs);
+    }
+
+    return array('categories' => $categories, 'category_counts' => $category_counts);
+}
+
+
+
+
+/**
  * Get list of available SOAP functions
  *
  * @param bool $categorize Whether to group functions by category (default: true)
@@ -395,33 +431,13 @@ function getFunctionList($categorize = true) {
         sort($functions);
 
         if ($categorize) {
-            $categories = array();
-            foreach ($functions as $func) {
-                $parts = explode('_', $func, 2);
-                $category = $parts[0];
-
-                if (empty($category) || !isset($parts[1])) {
-                    continue;
-                }
-
-                if (!isset($categories[$category])) {
-                    $categories[$category] = array();
-                }
-                $categories[$category][] = $func;
-            }
-
-            ksort($categories);
-
-            $category_counts = array();
-            foreach ($categories as $cat => $funcs) {
-                $category_counts[$cat] = count($funcs);
-            }
+            $grouped = categorizeFunctions($functions);
 
             return json_encode(array(
                 'success' => true,
                 'total_count' => count($functions),
-                'category_counts' => $category_counts,
-                'categories' => $categories
+                'category_counts' => $grouped['category_counts'],
+                'categories' => $grouped['categories']
             ), JSON_PRETTY_PRINT);
         } else {
             return json_encode(array(
@@ -947,6 +963,35 @@ function getAllDatabases() {
 
 
 /**
+ * Finds fields that differ between the original and modified records but were not
+ * part of the requested updates. Pure helper for the update functions, which
+ * refuse to write when the API would change fields the caller did not ask for.
+ *
+ * @param array $original Original record
+ * @param array $modified Record after applying the updates
+ * @param array $updates  Requested update fields (keys are the intended changes)
+ * @return array field => ['original' => mixed, 'modified' => mixed]
+ */
+function detectUnexpectedChanges($original, $modified, $updates) {
+    $unexpected = array();
+    foreach ($modified as $key => $value) {
+        if (isset($updates[$key])) {
+            continue;
+        }
+        if (array_key_exists($key, $original) && strval($original[$key]) !== strval($value)) {
+            $unexpected[$key] = array(
+                'original' => $original[$key],
+                'modified' => $value
+            );
+        }
+    }
+    return $unexpected;
+}
+
+
+
+
+/**
  * Updates a database record
  *
  * @param int $database_id Database ID
@@ -980,18 +1025,7 @@ function updateDatabase($database_id, $updates, $client_id = 0) {
             $database_record[$key] = $value;
         }
 
-        $unexpected_changes = array();
-        foreach ($database_record as $key => $value) {
-            if (isset($updates[$key])) {
-                continue;
-            }
-            if (array_key_exists($key, $original_record) && strval($original_record[$key]) !== strval($value)) {
-                $unexpected_changes[$key] = array(
-                    'original' => $original_record[$key],
-                    'modified' => $value
-                );
-            }
-        }
+        $unexpected_changes = detectUnexpectedChanges($original_record, $database_record, $updates);
 
         if (!empty($unexpected_changes)) {
             return json_encode(array(
@@ -1081,18 +1115,7 @@ function updateWebDomain($domain_id, $updates, $client_id = 0) {
                 $domain_record[$key] = $value;
             }
 
-            $unexpected_changes = array();
-            foreach ($domain_record as $key => $value) {
-                if (isset($updates[$key])) {
-                    continue;
-                }
-                if (array_key_exists($key, $original_record) && strval($original_record[$key]) !== strval($value)) {
-                    $unexpected_changes[$key] = array(
-                        'original' => $original_record[$key],
-                        'modified' => $value
-                    );
-                }
-            }
+            $unexpected_changes = detectUnexpectedChanges($original_record, $domain_record, $updates);
 
             if (!empty($unexpected_changes)) {
                 return json_encode(array(
@@ -1453,10 +1476,23 @@ function getDatabaseSizeFromMysql($database_name) {
 
     $output = shell_exec('mysql -N -e ' . escapeshellarg($sql) . ' 2>/dev/null');
 
-    if ($output === null || trim($output) === '' || trim($output) === 'NULL') {
+    return parseMysqlSize($output);
+}
+
+
+
+
+/**
+ * Parses a single-value `mysql -N` size result into an integer byte count.
+ * Pure helper for getDatabaseSizeFromMysql.
+ *
+ * @param string|null $output Raw `mysql -N` output
+ * @return int Size in bytes (0 for null / empty / NULL)
+ */
+function parseMysqlSize($output) {
+    if ($output === null || trim((string)$output) === '' || trim((string)$output) === 'NULL') {
         return 0;
     }
-
     return intval(trim($output));
 }
 
@@ -1500,10 +1536,7 @@ function getDiskUsageByDomain($domain_id) {
         $source = 'du';
 
         if (is_dir($document_root)) {
-            $output = shell_exec('du -sb ' . escapeshellarg($document_root) . ' 2>/dev/null');
-            if ($output) {
-                $used_bytes = intval(trim(explode("\t", $output)[0]));
-            }
+            $used_bytes = parseDuBytes(shell_exec('du -sb ' . escapeshellarg($document_root) . ' 2>/dev/null'));
         }
 
         $result = array(
@@ -1535,6 +1568,23 @@ function getDiskUsageByDomain($domain_id) {
 
 
 /**
+ * Parses `du -sb` output ("<bytes>\t<path>") into an integer byte count.
+ * Pure helper for getDiskUsageByDomain.
+ *
+ * @param string|null $output Raw `du -sb` output
+ * @return int Size in bytes (0 if empty / unparseable)
+ */
+function parseDuBytes($output) {
+    if (!$output) {
+        return 0;
+    }
+    return intval(trim(explode("\t", $output)[0]));
+}
+
+
+
+
+/**
  * Lists web directive snippets from the ISPConfig database.
  *
  * There is no SOAP API function for directive snippets, so this reads them
@@ -1557,8 +1607,28 @@ function getDirectiveSnippets() {
         ));
     }
 
+    $snippets = parseSnippetRows($output);
+
+    return json_encode(array(
+        'success'  => true,
+        'count'    => count($snippets),
+        'snippets' => $snippets
+    ));
+}
+
+
+
+
+/**
+ * Parses tab-separated `mysql -N` rows of directive snippets into structured
+ * records (id, name, type, active). Pure helper for getDirectiveSnippets.
+ *
+ * @param string $output Raw `mysql -N` output
+ * @return array List of snippet records
+ */
+function parseSnippetRows($output) {
     $snippets = array();
-    foreach (explode("\n", trim($output)) as $line) {
+    foreach (explode("\n", trim((string)$output)) as $line) {
         if ($line === '') {
             continue;
         }
@@ -1570,12 +1640,7 @@ function getDirectiveSnippets() {
             'active'                => isset($cols[3]) ? $cols[3] : '',
         );
     }
-
-    return json_encode(array(
-        'success'  => true,
-        'count'    => count($snippets),
-        'snippets' => $snippets
-    ));
+    return $snippets;
 }
 
 
@@ -1685,6 +1750,20 @@ function getFormDefaults($form_key) {
     $form = array();
     include $tforms[$form_key];
 
+    return extractFormDefaults($form);
+}
+
+
+
+
+/**
+ * Extracts field defaults from a loaded ISPConfig $form definition (walks
+ * tabs -> fields -> default). Pure helper for getFormDefaults.
+ *
+ * @param array $form ISPConfig tform definition
+ * @return array field => default value
+ */
+function extractFormDefaults($form) {
     $defaults = array();
     if (isset($form['tabs']) && is_array($form['tabs'])) {
         foreach ($form['tabs'] as $tab) {
@@ -1698,7 +1777,6 @@ function getFormDefaults($form_key) {
             }
         }
     }
-
     return $defaults;
 }
 
