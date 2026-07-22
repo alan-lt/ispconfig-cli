@@ -34,6 +34,63 @@ function parseArgs($argv) {
 
 
 /**
+ * Emit one NDJSON event line to stdout and flush it immediately.
+ *
+ * The CLI output contract: every line printed to stdout is exactly one JSON
+ * object carrying a "type" discriminator ("progress", "notice", "result").
+ * Consumers read line by line, json_decode each line and switch on type;
+ * anything that fails to decode should be ignored (stray PHP warning, etc.).
+ * flush() guarantees progress reaches the reader in real time.
+ *
+ * @param array $event Event payload; "type" is forced to the front
+ */
+function emitEvent($event) {
+    $type = isset($event['type']) ? $event['type'] : 'event';
+    unset($event['type']);
+    echo json_encode(array('type' => $type) + $event, JSON_UNESCAPED_SLASHES) . "\n";
+    flush();
+}
+
+/**
+ * Emit the terminal result event. Always the last line a command prints.
+ *
+ * Accepts either the array or the JSON string the action functions return.
+ * A non-decodable string is wrapped as a failed result so the stream stays
+ * valid NDJSON no matter what.
+ *
+ * @param array|string $result
+ * @return bool Whether the result reports success (missing success => true)
+ */
+function emitResult($result) {
+    if (is_string($result)) {
+        $decoded = json_decode($result, true);
+        $result = is_array($decoded)
+            ? $decoded
+            : array('success' => false, 'error' => 'Malformed result', 'raw' => $result);
+    }
+    unset($result['type']);
+    emitEvent(array('type' => 'result') + $result);
+    return !isset($result['success']) || $result['success'];
+}
+
+/**
+ * Emit a failed terminal result event and exit(1).
+ *
+ * Replaces the old die('Error: ...') pattern so failures stay on the NDJSON
+ * stream instead of printing free-form text that breaks the parser.
+ *
+ * @param string $error Human-readable error message
+ * @param array  $extra Extra fields to merge into the result event
+ */
+function failResult($error, $extra = array()) {
+    emitEvent(array('type' => 'result', 'success' => false, 'error' => $error) + $extra);
+    exit(1);
+}
+
+
+
+
+/**
  * Starts a new remote session
  *
  * @return array Array with 'client' (SoapClient) and 'session_id' (string)
@@ -460,111 +517,24 @@ function getFunctionList($categorize = true) {
 
 
 /**
- * Wait for empty job queue with connection error handling
+ * Wait for the ISPConfig job queue to drain (empty and stay empty).
+ *
+ * Polls monitor_jobqueue_count until it reports zero for $stable_iterations
+ * consecutive checks. A briefly unavailable API (SoapFault) is not fatal: it
+ * emits a "notice" and retries after $connection_wait seconds.
+ *
+ * Emits "progress"/"notice" NDJSON events via emitEvent() while waiting; the
+ * caller is responsible for emitting the terminal "result" from the returned
+ * array (see emitResult()).
  *
  * @param int $server_id Server ID (0 for all servers)
  * @param int $sleep_seconds Seconds between checks (default: 2)
  * @param int $timeout_seconds Maximum wait time (default: 300)
  * @param int $stable_iterations Consecutive zero counts required (default: 3)
- * @param int $connection_wait Connection error wait time in seconds (default: 10)
+ * @param int $connection_wait Seconds to wait after a connection error (default: 10)
  * @return array Result with success status
  */
-function waitForEmptyJobQueue_v2($server_id = 0, $sleep_seconds = 2, $timeout_seconds = 300, $stable_iterations = 3, $connection_wait = 10) {
-    global $soap_client, $soap_session_id;
-
-    if (!$soap_client || !$soap_session_id) {
-        return array(
-            'success' => false,
-            'error' => 'Not connected. Call initISPConfig() first.'
-        );
-    }
-
-    $start_time = time();
-    $iterations = 0;
-    $last_count = null;
-    $zero_count_streak = 0;
-
-    while (true) {
-        $iterations++;
-        $elapsed = time() - $start_time;
-
-        if ($elapsed >= $timeout_seconds) {
-            echo "\n✗ Timeout reached!\n";
-            return array(
-                'success' => false,
-                'error' => 'Timeout',
-                'timeout_seconds' => $timeout_seconds,
-                'iterations' => $iterations,
-                'elapsed_time' => $elapsed
-            );
-        }
-
-        try {
-            $count = $soap_client->monitor_jobqueue_count($soap_session_id, $server_id);
-            $count = intval($count);
-
-            if ($count !== $last_count) {
-                echo sprintf(
-                    "[%03ds] Jobs: %3d %s\n",
-                    $elapsed,
-                    $count,
-                    $count > 0 ? str_repeat("█", min($count, 50)) : "✓"
-                );
-                $last_count = $count;
-            }
-
-            if ($count === 0) {
-                $zero_count_streak++;
-
-                if ($zero_count_streak >= $stable_iterations) {
-                    echo "\n✓ Job queue is empty!\n";
-                    return array(
-                        'success' => true,
-                        'iterations' => $iterations,
-                        'elapsed_time' => $elapsed,
-                        'stable_checks' => $zero_count_streak
-                    );
-                } else {
-                    echo sprintf(
-                        "[%03ds] Jobs: 0 (confirming... %d/%d)\n",
-                        $elapsed,
-                        $zero_count_streak,
-                        $stable_iterations
-                    );
-                }
-            } else {
-                $zero_count_streak = 0;
-            }
-
-            sleep($sleep_seconds);
-
-        } catch (SoapFault $e) {
-            $zero_count_streak = 0;
-
-            echo sprintf(
-                "[%03ds] API unavailable, waiting %ds...\n",
-                $elapsed,
-                $connection_wait
-            );
-
-            sleep($connection_wait);
-        }
-    }
-}
-
-
-
-
-/**
- * Wait for empty job queue with improved reliability
- *
- * @param int $server_id Server ID (0 for all servers)
- * @param int $sleep_seconds Seconds between checks (default: 2)
- * @param int $timeout_seconds Maximum wait time (default: 300)
- * @param int $stable_iterations Number of consecutive zero counts required (default: 3)
- * @return array Result with success status
- */
-function waitForEmptyJobQueue($server_id = 0, $sleep_seconds = 2, $timeout_seconds = 300, $stable_iterations = 3) {
+function waitForEmptyJobQueue($server_id = 0, $sleep_seconds = 2, $timeout_seconds = 300, $stable_iterations = 3, $connection_wait = 10) {
     global $soap_client, $soap_session_id;
 
     if (!$soap_client || !$soap_session_id) {
@@ -582,6 +552,18 @@ function waitForEmptyJobQueue($server_id = 0, $sleep_seconds = 2, $timeout_secon
     try {
         while (true) {
             $iterations++;
+            $elapsed = time() - $start_time;
+
+            if ($elapsed >= $timeout_seconds) {
+                return array(
+                    'success' => false,
+                    'error' => 'Timeout',
+                    'timeout_seconds' => $timeout_seconds,
+                    'iterations' => $iterations,
+                    'elapsed_time' => $elapsed,
+                    'final_count' => $last_count
+                );
+            }
 
             try {
                 $count = $soap_client->monitor_jobqueue_count($soap_session_id, $server_id);
@@ -593,23 +575,20 @@ function waitForEmptyJobQueue($server_id = 0, $sleep_seconds = 2, $timeout_secon
                 $count = intval($count);
 
             } catch (SoapFault $e) {
-                return array(
-                    'success' => false,
-                    'error' => 'SOAP Error: ' . $e->getMessage(),
-                    'iterations' => $iterations,
-                    'elapsed_time' => time() - $start_time
-                );
+                // API briefly unavailable — notify and retry instead of failing.
+                $zero_count_streak = 0;
+                emitEvent(array(
+                    'type' => 'notice',
+                    'message' => 'API unavailable, retrying',
+                    'wait' => $connection_wait,
+                    'elapsed' => $elapsed
+                ));
+                sleep($connection_wait);
+                continue;
             }
 
-            $elapsed = time() - $start_time;
-
             if ($count !== $last_count) {
-                echo sprintf(
-                    "[%03ds] Jobs: %3d %s\n",
-                    $elapsed,
-                    $count,
-                    $count > 0 ? str_repeat("█", min($count, 50)) : "✓"
-                );
+                emitEvent(array('type' => 'progress', 'jobs' => $count, 'elapsed' => $elapsed));
                 $last_count = $count;
             }
 
@@ -617,35 +596,23 @@ function waitForEmptyJobQueue($server_id = 0, $sleep_seconds = 2, $timeout_secon
                 $zero_count_streak++;
 
                 if ($zero_count_streak >= $stable_iterations) {
-                    echo "\n✓ Job queue is stable at zero for {$stable_iterations} iterations!\n";
                     return array(
                         'success' => true,
                         'iterations' => $iterations,
                         'elapsed_time' => $elapsed,
                         'stable_checks' => $zero_count_streak
                     );
-                } else {
-                    echo sprintf(
-                        "[%03ds] Jobs: 0 (confirming... %d/%d)\n",
-                        $elapsed,
-                        $zero_count_streak,
-                        $stable_iterations
-                    );
                 }
+
+                emitEvent(array(
+                    'type' => 'progress',
+                    'jobs' => 0,
+                    'elapsed' => $elapsed,
+                    'stable' => $zero_count_streak,
+                    'stable_target' => $stable_iterations
+                ));
             } else {
                 $zero_count_streak = 0;
-            }
-
-            if ($elapsed >= $timeout_seconds) {
-                echo "\n✗ Timeout reached!\n";
-                return array(
-                    'success' => false,
-                    'error' => 'Timeout',
-                    'timeout_seconds' => $timeout_seconds,
-                    'iterations' => $iterations,
-                    'elapsed_time' => $elapsed,
-                    'final_count' => $count
-                );
             }
 
             sleep($sleep_seconds);
@@ -665,79 +632,17 @@ function waitForEmptyJobQueue($server_id = 0, $sleep_seconds = 2, $timeout_secon
 
 
 /**
- * Wait for empty queue with progress display
- *
- * @deprecated Use waitForEmptyJobQueue() instead
- */
-function waitWithProgress($server_id = 0, $sleep_seconds = 2, $timeout_seconds = 300) {
-    global $soap_client, $soap_session_id;
-
-    $start_time = time();
-    $iterations = 0;
-    $last_count = null;
-
-    echo "Monitoring job queue:\n";
-
-    try {
-        while (true) {
-            $iterations++;
-            $count = $soap_client->monitor_jobqueue_count($soap_session_id, $server_id);
-            $elapsed = time() - $start_time;
-
-            if ($count !== $last_count) {
-                echo sprintf(
-                    "[%03ds] Jobs: %3d %s\n",
-                    $elapsed,
-                    $count,
-                    $count > 0 ? str_repeat("█", min($count, 50)) : "✓"
-                );
-                $last_count = $count;
-            }
-
-            if ($count === 0) {
-                echo "\n✓ Job queue is empty!\n";
-                return array(
-                    'success'      => true,
-                    'iterations'   => $iterations,
-                    'elapsed_time' => $elapsed
-                );
-            }
-
-            if ($elapsed >= $timeout_seconds) {
-                echo "\n✗ Timeout reached!\n";
-                return array(
-                    'success'     => false,
-                    'error'       => 'Timeout',
-                    'final_count' => $count
-                );
-            }
-
-            sleep($sleep_seconds);
-        }
-
-    } catch (SoapFault $e) {
-        return array(
-            'success' => false,
-            'error'   => $e->getMessage()
-        );
-    }
-}
-
-
-
-
-/**
  * Wait for empty queue with progress display (short wrapper)
  */
 function waitWithProgressShort()
 {
-    global $soap_client, $soap_session_id;
-
-    echo "\n";
-    $result = waitForEmptyJobQueue_v2(0, 2, 300, 2, 10);
-    if ($result['success']) {
-        echo "Completed in " . $result['elapsed_time'] . " seconds\n";
-    }
+    $result = waitForEmptyJobQueue(0, 2, 300, 2, 10);
+    emitEvent(array(
+        'type'    => 'notice',
+        'message' => $result['success'] ? 'Job queue drained' : 'Job queue wait ended without draining',
+        'elapsed' => isset($result['elapsed_time']) ? $result['elapsed_time'] : 0
+    ));
+    return $result;
 }
 
 

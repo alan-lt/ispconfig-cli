@@ -8,10 +8,10 @@ try {
 
 	$result = getJobQueueCount($server_id);
 
-	echo $result . "\n";
+	emitResult($result);
 
 	closeISPConfig();
 
 } catch (Exception $e) {
-	die('Error: ' . $e->getMessage() . "\n");
+	failResult($e->getMessage());
 }

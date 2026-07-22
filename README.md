@@ -56,14 +56,112 @@ cp .env.example .env
 
 ## Output Format
 
-All commands return JSON-formatted output with the following structure:
-- `success`: Boolean indicating if the operation succeeded
-- `data` or specific result fields: The actual response data
-- `error`: Error message (only present if success is false)
+Every command speaks a single, uniform contract on **stdout**: an **NDJSON event
+stream**. Each line is exactly one JSON object carrying a `type` discriminator.
+There is never any human-decorated text on stdout (no progress bars, no `✓`/`✗`,
+no `Error:` prefixes) — presentation is the consumer's job, so the stream stays
+machine-parseable without a "parser of a parser".
+
+### The rule
+
+- **One line = one JSON object.** Read stdout line by line, `json_decode` each
+  line, `switch` on `type`.
+- **The last line is always `type: "result"`** — the terminal outcome of the
+  command. Everything before it (if anything) is progress/diagnostics.
+- **Ignore any line that fails to decode** (a stray PHP warning, etc.) — this
+  keeps a consumer robust.
+
+### Event types
+
+| `type`     | When                                   | Key fields |
+|------------|----------------------------------------|------------|
+| `progress` | Emitted repeatedly while waiting on the ISPConfig job queue (provisioning in progress) | `jobs` (pending count), `elapsed` (seconds since the wait started), and during the settle phase `stable` / `stable_target` (confirmation ticks x/y) |
+| `notice`   | Transient, non-fatal condition during a wait | `message`, `elapsed`, and context (e.g. `wait` seconds before retry) |
+| `result`   | Exactly once, as the final line        | `success` (bool); on success the payload fields (e.g. `database_id`); on failure `error` |
+
+### Example stream
+
+A long-running command (creates the record, then waits for the job queue to drain):
+
+```
+{"type":"progress","jobs":3,"elapsed":2}
+{"type":"progress","jobs":0,"elapsed":8,"stable":1,"stable_target":3}
+{"type":"notice","message":"API unavailable, retrying","wait":10,"elapsed":12}
+{"type":"progress","jobs":0,"elapsed":24,"stable":3,"stable_target":3}
+{"type":"result","success":true,"database_id":42,"database_name":"c1_shop"}
+```
+
+A synchronous command (a `get`) emits only the terminal line:
+
+```
+{"type":"result","success":true,"data":[{"database_id":"42","database_name":"c1_shop"}]}
+```
+
+> The per-command **Output** examples further down show the *payload* of the
+> `result` event for brevity. On the wire each is a single line wrapped as
+> `{"type":"result", …}`.
+
+### Consuming the stream
+
+Show `progress`/`notice` to the user live (this is how you convey "what's
+happening and how long it's taking"), and act on the final `result`:
+
+```bash
+# bash: render progress to stderr, keep the last result line for the caller
+result=""
+while IFS= read -r line; do
+  type=$(jq -r '.type // empty' <<<"$line" 2>/dev/null) || continue
+  case "$type" in
+    progress) jq -r '"  jobs=\(.jobs) elapsed=\(.elapsed)s"' <<<"$line" >&2 ;;
+    notice)   jq -r '"  note: \(.message)"'                  <<<"$line" >&2 ;;
+    result)   result="$line" ;;
+  esac
+done < <(./sites_database_add.php --domain_id=5 --database_name=c1_shop --database_user_id=7)
+
+echo "$result" | jq .          # the final outcome, clean JSON
+```
+
+```php
+// PHP: same idea, calling the CLI (or the library functions) directly
+$last = null;
+foreach (explode("\n", trim($output)) as $line) {
+    $ev = json_decode($line, true);
+    if (!is_array($ev) || !isset($ev['type'])) continue;   // skip noise
+    if ($ev['type'] === 'progress') renderProgress($ev);   // your UI
+    if ($ev['type'] === 'result')   $last = $ev;           // keep the outcome
+}
+// $last is the terminal result event
+```
+
+When calling the library functions in-process, the same events are produced by
+`emitEvent()` / `emitResult()` in `soap_functions.php`. The wait functions
+(`waitForEmptyJobQueue`, `waitForEmptyJobQueue_v2`) emit the `progress`/`notice`
+lines and **return** their summary array; the calling script emits the single
+terminal `result` (via `emitResult()`), so there is always exactly one `result`
+line per command.
+
+### Exit codes
+
+- `0` — the command produced a `result` line. Check its `success` field for the
+  operational outcome (a `get` that found nothing still exits `0` with
+  `success:true`).
+- `1` — a hard failure before/around producing a normal result: missing/invalid
+  arguments or an uncaught exception. These still emit a valid
+  `{"type":"result","success":false,"error":"…"}` line (via `failResult()`), so
+  the stream is valid NDJSON even on failure.
 
 ### `--help`
 
-Besides usage, it returns the default values for those scripts — the effective `--data` JSON, read live from ISPConfig's form definition (so it stays correct across updates) — which you can override with `--data='<json>'`.
+`--help` also emits a single `result` event whose `defaults` field holds the
+effective `--data` JSON — the script's defaults merged over ISPConfig's live form
+definition (read live so it stays correct across updates). Pretty-print it with
+`jq`:
+
+```bash
+./sites_database_add.php --help | jq .defaults
+```
+
+Any field shown can be overridden with `--data='<json>'`.
 
 ---
 

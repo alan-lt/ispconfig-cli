@@ -50,7 +50,7 @@ $config = array(
 if (isset($arrArg['data'])) {
 	$override = json_decode($arrArg['data'], true);
 	if ($override === null) {
-		die('Error: invalid JSON in --data parameter' . "\n");
+		failResult('invalid JSON in --data parameter');
 	}
 	$config = array_merge($config, $override);
 }
@@ -59,12 +59,12 @@ if (isset($arrArg['data'])) {
 // updates) with the settings above merged on top.
 if (isset($arrArg['help'])) {
 	$defaults = getFormDefaults('WEB_DOMAIN_TFORM');
-	echo json_encode(array_merge($defaults, $config), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+	emitEvent(array('type' => 'result', 'success' => true, 'defaults' => array_merge($defaults, $config)));
 	exit(0);
 }
 
 if (!isset($arrArg['domain'])) {
-	die('--domain=domain.tld not present' . "\n");
+	failResult('--domain=domain.tld not present');
 }
 
 try {
@@ -72,10 +72,10 @@ try {
 
 	$result = addWebDomain($config);
 
-	echo $result . "\n";
+	emitResult($result);
 
 	closeISPConfig();
 
 } catch (Exception $e) {
-	die('Error: ' . $e->getMessage() . "\n");
+	failResult($e->getMessage());
 }

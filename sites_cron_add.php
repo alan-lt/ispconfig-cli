@@ -43,22 +43,22 @@ $config = array(
 if (isset($arrArg['data'])) {
 	$override = json_decode($arrArg['data'], true);
 	if ($override === null) {
-		die('Error: invalid JSON in --data parameter' . "\n");
+		failResult('invalid JSON in --data parameter');
 	}
 	$config = array_merge($config, $override);
 }
 
 // --help: ISPConfig's live form defaults with the settings above merged on top
 if (isset($arrArg['help'])) {
-	echo json_encode(array_merge(getFormDefaults('CRON_TFORM'), $config), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+	emitEvent(array('type' => 'result', 'success' => true, 'defaults' => array_merge(getFormDefaults('CRON_TFORM'), $config)));
 	exit(0);
 }
 
 if (!isset($arrArg['domain_id'])) {
-	die('--domain_id=<int> not present' . "\n");
+	failResult('--domain_id=<int> not present');
 }
 if (!isset($arrArg['command'])) {
-	die('--command=<str> not present' . "\n");
+	failResult('--command=<str> not present');
 }
 
 try {
@@ -66,10 +66,10 @@ try {
 
 	$result = addCron($config);
 
-	echo $result . "\n";
+	emitResult($result);
 
 	closeISPConfig();
 
 } catch (Exception $e) {
-	die('Error: ' . $e->getMessage() . "\n");
+	failResult($e->getMessage());
 }

@@ -8,10 +8,10 @@ try {
 
 	$result = getDirectiveSnippets();
 
-	echo $result . "\n";
+	emitResult($result);
 
 	closeISPConfig();
 
 } catch (Exception $e) {
-	die('Error: ' . $e->getMessage() . "\n");
+	failResult($e->getMessage());
 }
