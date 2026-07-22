@@ -963,6 +963,151 @@ function getAllDatabases() {
 
 
 /**
+ * Adds a new cron job
+ *
+ * @param array $config Cron configuration
+ * @return string JSON response
+ */
+function addCron($config) {
+    global $soap_client, $soap_session_id;
+
+    if (!$soap_client || !$soap_session_id) {
+        return json_encode(array(
+            'success' => false,
+            'error' => 'Not connected. Call initISPConfig() first.'
+        ));
+    }
+
+    try {
+        if (empty($config['parent_domain_id'])) {
+            throw new Exception('Cron parent web domain ID is required');
+        }
+        if (empty($config['command'])) {
+            throw new Exception('Cron command is required');
+        }
+
+        $client_id = isset($config['client_id']) ? $config['client_id'] : 1;
+        unset($config['client_id']);
+
+        $defaults = array(
+            'server_id'        => 1,
+            'parent_domain_id' => 0,
+            'type'             => 'url',
+            'command'          => '',
+            'run_min'          => '*',
+            'run_hour'         => '*',
+            'run_mday'         => '*',
+            'run_month'        => '*',
+            'run_wday'         => '*',
+            'active'           => 'y'
+        );
+
+        $params = array_merge($defaults, $config);
+
+        $cron_id = $soap_client->sites_cron_add(
+            $soap_session_id,
+            $client_id,
+            $params
+        );
+
+        return json_encode(array(
+            'success' => true,
+            'cron_id' => $cron_id,
+            'command' => $params['command']
+        ));
+
+    } catch (SoapFault $e) {
+        return json_encode(array(
+            'success' => false,
+            'command' => isset($params['command']) ? $params['command'] : '',
+            'error'   => $e->getMessage(),
+            'trace'   => $soap_client->__getLastResponse()
+        ));
+    } catch (Exception $e) {
+        return json_encode(array(
+            'success' => false,
+            'command' => isset($params['command']) ? $params['command'] : '',
+            'error'   => $e->getMessage()
+        ));
+    }
+}
+
+
+
+
+/**
+ * Retrieves information about a cron job
+ *
+ * @param mixed $cron_id Cron ID (integer) or '-1' for all cron jobs
+ * @return string JSON response
+ */
+function getCron($cron_id) {
+    global $soap_client, $soap_session_id;
+
+    if (!$soap_client || !$soap_session_id) {
+        return json_encode(array(
+            'success' => false,
+            'error' => 'Not connected. Call initISPConfig() first.'
+        ));
+    }
+
+    try {
+        $crons = $soap_client->sites_cron_get($soap_session_id, $cron_id);
+
+        if ($cron_id === '-1' || $cron_id === -1) {
+            if (!is_array($crons)) {
+                $crons = array();
+            }
+
+            $result = array();
+            foreach ($crons as $cron) {
+                $result[$cron['id']] = $cron;
+            }
+
+            return json_encode(array(
+                'success' => true,
+                'count' => count($result),
+                'crons' => $result
+            ));
+        } else {
+            if (!$crons) {
+                return json_encode(array(
+                    'success' => false,
+                    'error' => 'Cron not found'
+                ));
+            }
+
+            return json_encode(array(
+                'success' => true,
+                'data' => $crons
+            ));
+        }
+
+    } catch (SoapFault $e) {
+        return json_encode(array(
+            'success' => false,
+            'error' => $e->getMessage(),
+            'trace' => $soap_client->__getLastResponse()
+        ));
+    }
+}
+
+
+
+
+/**
+ * Retrieves information about all cron jobs
+ *
+ * @return string JSON response
+ */
+function getAllCrons() {
+    return getCron('-1');
+}
+
+
+
+
+/**
  * Finds fields that differ between the original and modified records but were not
  * part of the requested updates. Pure helper for the update functions, which
  * refuse to write when the API would change fields the caller did not ask for.
@@ -1740,6 +1885,7 @@ function getFormDefaults($form_key) {
         'WEB_DOMAIN_TFORM'    => '/usr/local/ispconfig/interface/web/sites/form/web_vhost_domain.tform.php',
         'DATABASE_TFORM'      => '/usr/local/ispconfig/interface/web/sites/form/database.tform.php',
         'DATABASE_USER_TFORM' => '/usr/local/ispconfig/interface/web/sites/form/database_user.tform.php',
+        'CRON_TFORM'          => '/usr/local/ispconfig/interface/web/sites/form/cron.tform.php',
     );
 
     if (!isset($tforms[$form_key]) || !is_file($tforms[$form_key])) {

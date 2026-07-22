@@ -31,6 +31,10 @@ Command-line interface tools for managing ISPConfig via SOAP API.
   - [sites_database_user_add.php](#sites_database_user_addphp) — create a database user
   - [sites_database_user_get.php](#sites_database_user_getphp) — get database user by ID
   - [sites_database_user_get_all.php](#sites_database_user_get_allphp) — list all database users
+- **Cron Management**
+  - [sites_cron_add.php](#sites_cron_addphp) — create a cron job
+  - [sites_cron_get.php](#sites_cron_getphp) — get cron job by ID
+  - [sites_cron_get_all.php](#sites_cron_get_allphp) — list all cron jobs
 - **Web Server Config**
   - [directive_snippets_get_all.php](#directive_snippets_get_allphp) — list all directive snippets (apache/nginx/php templates)
   - [sites_web_domain_directive_snippet_set.php](#sites_web_domain_directive_snippet_setphp) — assign a directive snippet to a web domain
@@ -661,6 +665,133 @@ Retrieves information about all database users.
     "2": {
       "database_user_id": 2,
       "database_user": "c1user2",
+      ...
+    }
+  }
+}
+```
+
+---
+
+## Cron Management
+
+### sites_cron_add.php
+
+Creates a new cron job attached to a web domain.
+
+**Usage:**
+```bash
+./sites_cron_add.php --domain_id=<id> --command=<str> [--data='<json>']
+```
+
+**Example:**
+```bash
+# Shell command, daily at 02:00 (ISPConfig placeholders are expanded on the server)
+./sites_cron_add.php --domain_id=42 \
+  --command="cd {DOCROOT_CLIENT}/../private/bin/; {SITE_PHP} cron.php" \
+  --data='{"run_min":"0","run_hour":"2"}'
+
+# URL cron (wget-style) every minute
+./sites_cron_add.php --domain_id=42 \
+  --command="http://example.com/cron" \
+  --data='{"type":"url"}'
+```
+
+**Output:**
+```json
+{
+  "success": true,
+  "cron_id": 7,
+  "command": "cd {DOCROOT_CLIENT}/../private/bin/; {SITE_PHP} cron.php"
+}
+```
+
+**Required Parameters:**
+- `--domain_id`: Web domain ID the cron belongs to (used as parent_domain_id)
+- `--command`: Command to run (a shell command, or an http(s):// URL for `type=url`)
+
+**The `type` field:** unlike the web UI — which derives it automatically and hides
+it — the SOAP API does not, so you set it yourself. It controls how the command runs:
+
+| type       | how it runs                                          | command      |
+|------------|------------------------------------------------------|--------------|
+| `full`     | shell command as the web user, no chroot (default)   | shell        |
+| `chrooted` | shell command inside the site's jailkit chroot       | shell        |
+| `url`      | ISPConfig fetches the URL (wget-style)               | http(s):// URL |
+
+Override it via `--data='{"type":"url"}'`.
+
+**Default Configuration:**
+- Type: full
+- Schedule: every minute (`* * * * *`) — override the `run_min`/`run_hour`/`run_mday`/`run_month`/`run_wday` fields via `--data`
+- Active: yes
+
+---
+
+### sites_cron_get.php
+
+Retrieves information about a specific cron job by ID.
+
+**Usage:**
+```bash
+./sites_cron_get.php --id=<cron_id>
+```
+
+**Example:**
+```bash
+./sites_cron_get.php --id=7
+```
+
+**Output:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": 7,
+    "parent_domain_id": 42,
+    "type": "full",
+    "command": "cd {DOCROOT_CLIENT}/../private/bin/; {SITE_PHP} cron.php",
+    "run_min": "0",
+    "run_hour": "2",
+    "run_mday": "*",
+    "run_month": "*",
+    "run_wday": "*",
+    "active": "y",
+    ...
+  }
+}
+```
+
+**Required Parameters:**
+- `--id`: Cron ID (integer)
+
+---
+
+### sites_cron_get_all.php
+
+Retrieves information about all cron jobs in the system.
+
+**Usage:**
+```bash
+./sites_cron_get_all.php
+```
+
+**Output:**
+```json
+{
+  "success": true,
+  "count": 3,
+  "crons": {
+    "1": {
+      "id": 1,
+      "parent_domain_id": 26,
+      "type": "full",
+      ...
+    },
+    "2": {
+      "id": 2,
+      "parent_domain_id": 42,
+      "type": "url",
       ...
     }
   }

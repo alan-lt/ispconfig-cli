@@ -1,0 +1,22 @@
+#!/usr/bin/php
+<?php
+
+require 'soap_functions.php';
+
+if (!isset($arrArg['id'])) {
+	die('--id=<int> not present' . "\n");
+}
+
+try {
+	initISPConfig();
+
+	$cron_id = $arrArg['id'];
+	$result = getCron($cron_id);
+
+	echo $result . "\n";
+
+	closeISPConfig();
+
+} catch (Exception $e) {
+	die('Error: ' . $e->getMessage() . "\n");
+}
