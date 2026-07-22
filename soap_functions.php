@@ -632,23 +632,6 @@ function waitForEmptyJobQueue($server_id = 0, $sleep_seconds = 2, $timeout_secon
 
 
 /**
- * Wait for empty queue with progress display (short wrapper)
- */
-function waitWithProgressShort()
-{
-    $result = waitForEmptyJobQueue(0, 2, 300, 2, 10);
-    emitEvent(array(
-        'type'    => 'notice',
-        'message' => $result['success'] ? 'Job queue drained' : 'Job queue wait ended without draining',
-        'elapsed' => isset($result['elapsed_time']) ? $result['elapsed_time'] : 0
-    ));
-    return $result;
-}
-
-
-
-
-/**
  * Adds a new database user
  *
  * @param array $config Database user configuration

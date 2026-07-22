@@ -118,7 +118,7 @@ try {
     echo "  Summary: {$stats['domains']['ok']}/$total successful\n";
 
     echo "Waiting for job queue -\n";
-    waitWithProgressShort();
+    waitForEmptyJobQueue(0, 2, 300, 2, 10);
     sleep(2);
 
 
@@ -171,7 +171,7 @@ try {
     echo "  Summary: {$stats['users']['ok']}/$total successful\n";
 
     echo "Waiting for job queue -\n";
-    waitWithProgressShort();
+    waitForEmptyJobQueue(0, 2, 300, 2, 10);
     sleep(2);
 
 
@@ -225,7 +225,7 @@ try {
     echo "  Summary: {$stats['databases']['ok']}/$total successful\n";
 
     echo "Waiting for job queue -\n";
-    waitWithProgressShort();
+    waitForEmptyJobQueue(0, 2, 300, 2, 10);
     sleep(1);
 
 
