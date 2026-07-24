@@ -18,10 +18,10 @@ the ISPConfig interface library, which soap_env.php bootstraps for every script.
 require __DIR__ . '/soap_functions.php';
 
 if (!isset($arrArg['domain_id'])) {
-	die('--domain_id=<int> not present' . "\n");
+	failResult('--domain_id=<int> not present');
 }
 if (!isset($arrArg['snippet_id']) && !isset($arrArg['snippet_name'])) {
-	die('--snippet_id=<int> or --snippet_name="<name>" not present' . "\n");
+	failResult('--snippet_id=<int> or --snippet_name="<name>" not present');
 }
 
 $result = setDirectiveSnippet(
@@ -30,5 +30,4 @@ $result = setDirectiveSnippet(
 	isset($arrArg['snippet_name']) ? $arrArg['snippet_name'] : null
 );
 
-echo json_encode($result) . "\n";
-exit($result['success'] ? 0 : 1);
+exit(emitResult($result) ? 0 : 1);

@@ -15,21 +15,21 @@ require 'soap_functions.php';
 
 // --help: the fields (with ISPConfig's live defaults) that can be passed via --data
 if (isset($arrArg['help'])) {
-	echo json_encode(getFormDefaults('WEB_DOMAIN_TFORM'), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+	emitEvent(array('type' => 'result', 'success' => true, 'defaults' => getFormDefaults('WEB_DOMAIN_TFORM')));
 	exit(0);
 }
 
 if (!isset($arrArg['id'])) {
-	die('--id=<int> not present' . "\n");
+	failResult('--id=<int> not present');
 }
 
 if (!isset($arrArg['data'])) {
-	die('--data=\'{"field": "value"}\' not present' . "\n");
+	failResult('--data=\'{"field": "value"}\' not present');
 }
 
 $updates = json_decode($arrArg['data'], true);
 if ($updates === null) {
-	die('Error: invalid JSON in --data parameter' . "\n");
+	failResult('invalid JSON in --data parameter');
 }
 
 try {
@@ -37,10 +37,10 @@ try {
 
 	$result = updateWebDomain($arrArg['id'], $updates, $client_id);
 
-	echo $result . "\n";
+	emitResult($result);
 
 	closeISPConfig();
 
 } catch (Exception $e) {
-	die('Error: ' . $e->getMessage() . "\n");
+	failResult($e->getMessage());
 }

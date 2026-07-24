@@ -6,7 +6,7 @@ require 'soap_functions.php';
 try {
 	initISPConfig();
 
-	$result = getDirectiveSnippets();
+	$result = getAllCrons();
 
 	emitResult($result);
 
@@ -15,3 +15,5 @@ try {
 } catch (Exception $e) {
 	failResult($e->getMessage());
 }
+
+?>

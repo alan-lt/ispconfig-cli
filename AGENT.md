@@ -8,6 +8,14 @@
 - CLI scripts should follow the same patterns as existing ones (see `sites_web_domain_get.php` as reference).
 - Remove unused code immediately. Do not leave dead functions.
 
+## Editing workflow
+
+- **One file, one edit.** Apply all changes to a given file in a single edit
+  (rewrite the whole file if needed) instead of many small line-by-line edits —
+  the user should confirm one change per file, not dozens.
+- Exception: if a change is genuinely complex, it may be split into a few
+  passes (still keep the number of edits small and deliberate).
+
 ## Security
 
 - No real credentials, IPs, hostnames, or domain names in code or documentation.
@@ -24,6 +32,20 @@
 - `soap_env.php` — connection config and env loading
 - `*.php` — CLI scripts, one per action
 - CLI scripts are thin: parse args, call function, print result
+
+## Output contract (stdout = NDJSON)
+
+Every command prints an NDJSON event stream: one JSON object per line, each with
+a `type` ("progress", "notice", "result"). The last line is always the terminal
+`result`. No human-decorated text on stdout — presentation is the consumer's job.
+See the "Output Format" section in `README.md` for the full contract.
+
+- Emit the terminal result with `emitResult($result)` (never `echo $result`).
+- Emit a hard failure (bad args, caught exception) with `failResult('message')`,
+  which prints `{"type":"result","success":false,"error":…}` and `exit(1)`
+  (never `die('...')`).
+- Long-running (job-queue) waits emit `progress`/`notice` via `emitEvent()`;
+  keep the human rendering (bars, ✓/✗) out of the library — the consumer draws it.
 
 ## Testing & Docs
 

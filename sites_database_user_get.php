@@ -4,7 +4,7 @@
 require 'soap_functions.php';
 
 if (!isset($arrArg['id'])) {
-	die('--id=<int> not present' . "\n");
+	failResult('--id=<int> not present');
 }
 
 try {
@@ -13,10 +13,10 @@ try {
 	$database_user_id = $arrArg['id'];
 	$result = getDatabaseUser($database_user_id);
 
-	echo $result . "\n";
+	emitResult($result);
 
 	closeISPConfig();
 
 } catch (Exception $e) {
-	die('Error: ' . $e->getMessage() . "\n");
+	failResult($e->getMessage());
 }

@@ -10,7 +10,7 @@ Usage:
 require 'soap_functions.php';
 
 if (!isset($arrArg['domain_name']) && !isset($arrArg['domain_id'])) {
-	die('--domain_name=domain.tld or --domain_id=<int> not present' . "\n");
+	failResult('--domain_name=domain.tld or --domain_id=<int> not present');
 }
 
 try {
@@ -19,7 +19,7 @@ try {
 	if (isset($arrArg['domain_name'])) {
 		$domain_data = json_decode(getWebDomain(array('domain' => $arrArg['domain_name'])), true);
 		if (!$domain_data['success'] || empty($domain_data['data'])) {
-			die('Error: Domain not found' . "\n");
+			failResult('Domain not found');
 		}
 		$domain_id = intval($domain_data['data'][0]['domain_id']);
 	} else {
@@ -28,10 +28,10 @@ try {
 
 	$result = getDatabaseSizeByDomain($domain_id);
 
-	echo $result . "\n";
+	emitResult($result);
 
 	closeISPConfig();
 
 } catch (Exception $e) {
-	die('Error: ' . $e->getMessage() . "\n");
+	failResult($e->getMessage());
 }

@@ -31,6 +31,10 @@ Command-line interface tools for managing ISPConfig via SOAP API.
   - [sites_database_user_add.php](#sites_database_user_addphp) — create a database user
   - [sites_database_user_get.php](#sites_database_user_getphp) — get database user by ID
   - [sites_database_user_get_all.php](#sites_database_user_get_allphp) — list all database users
+- **Cron Management**
+  - [sites_cron_add.php](#sites_cron_addphp) — create a cron job
+  - [sites_cron_get.php](#sites_cron_getphp) — get cron job by ID
+  - [sites_cron_get_all.php](#sites_cron_get_allphp) — list all cron jobs
 - **Web Server Config**
   - [directive_snippets_get_all.php](#directive_snippets_get_allphp) — list all directive snippets (apache/nginx/php templates)
   - [sites_web_domain_directive_snippet_set.php](#sites_web_domain_directive_snippet_setphp) — assign a directive snippet to a web domain
@@ -52,14 +56,130 @@ cp .env.example .env
 
 ## Output Format
 
-All commands return JSON-formatted output with the following structure:
-- `success`: Boolean indicating if the operation succeeded
-- `data` or specific result fields: The actual response data
-- `error`: Error message (only present if success is false)
+Every command speaks a single, uniform contract on **stdout**: an **NDJSON event
+stream**. Each line is exactly one JSON object carrying a `type` discriminator.
+There is never any human-decorated text on stdout (no progress bars, no `✓`/`✗`,
+no `Error:` prefixes) — presentation is the consumer's job, so the stream stays
+machine-parseable without a "parser of a parser".
+
+### The rule
+
+- **One line = one JSON object.** Read stdout line by line, `json_decode` each
+  line, `switch` on `type`.
+- **The last line is always `type: "result"`** — the terminal outcome of the
+  command. Everything before it (if anything) is progress/diagnostics.
+- **Ignore any line that fails to decode** (a stray PHP warning, etc.) — this
+  keeps a consumer robust.
+
+### Event types
+
+| `type`     | When                                   | Key fields |
+|------------|----------------------------------------|------------|
+| `progress` | Emitted repeatedly while waiting on the ISPConfig job queue (provisioning in progress) | `jobs` (pending count), `elapsed` (seconds since the wait started), and during the settle phase `stable` / `stable_target` (confirmation ticks x/y) |
+| `notice`   | Transient, non-fatal condition during a wait | `message`, `elapsed`, and context (e.g. `wait` seconds before retry) |
+| `result`   | Exactly once, as the final line        | `success` (bool); on success the payload fields (e.g. `database_id`); on failure `error` |
+
+### Example stream
+
+A multi-step process that waits for the job queue to drain between operations
+(via `waitForEmptyJobQueue()`) emits `progress`/`notice` while waiting, then the
+terminal `result`:
+
+```
+{"type":"progress","jobs":3,"elapsed":2}
+{"type":"progress","jobs":0,"elapsed":8,"stable":1,"stable_target":3}
+{"type":"notice","message":"API unavailable, retrying","wait":10,"elapsed":12}
+{"type":"progress","jobs":0,"elapsed":24,"stable":3,"stable_target":3}
+{"type":"result","success":true,"database_id":42,"database_name":"c1_shop"}
+```
+
+A synchronous command (a `get`) emits only the terminal line:
+
+```
+{"type":"result","success":true,"data":[{"database_id":"42","database_name":"c1_shop"}]}
+```
+
+> The per-command **Output** examples further down show the *payload* of the
+> `result` event for brevity. On the wire each is a single line wrapped as
+> `{"type":"result", …}`.
+
+### Consuming the stream
+
+Show `progress`/`notice` to the user live (this is how you convey "what's
+happening and how long it's taking"), and act on the final `result`:
+
+```bash
+# bash: render progress to stderr, keep the last result line for the caller
+result=""
+while IFS= read -r line; do
+  type=$(jq -r '.type // empty' <<<"$line" 2>/dev/null) || continue
+  case "$type" in
+    progress) jq -r '"  jobs=\(.jobs) elapsed=\(.elapsed)s"' <<<"$line" >&2 ;;
+    notice)   jq -r '"  note: \(.message)"'                  <<<"$line" >&2 ;;
+    result)   result="$line" ;;
+  esac
+done < <(./sites_database_add.php --domain_id=5 --database_name=c1_shop --database_user_id=7)
+
+echo "$result" | jq .          # the final outcome, clean JSON
+```
+
+```php
+// PHP: same idea, calling the CLI (or the library functions) directly
+$last = null;
+foreach (explode("\n", trim($output)) as $line) {
+    $ev = json_decode($line, true);
+    if (!is_array($ev) || !isset($ev['type'])) continue;   // skip noise
+    if ($ev['type'] === 'progress') renderProgress($ev);   // your UI
+    if ($ev['type'] === 'result')   $last = $ev;           // keep the outcome
+}
+// $last is the terminal result event
+```
+
+When calling the library functions in-process, the same events are produced by
+`emitEvent()` / `emitResult()` in `soap_functions.php`.
+
+**Where `progress`/`notice` come from.** A plain command (an `add`, `edit`, `get`,
+`delete`) is synchronous: it performs its one API call and emits only the terminal
+`result` line — no `progress`. The `progress`/`notice` stream appears only when a
+process explicitly waits on the ISPConfig job queue via `waitForEmptyJobQueue()`.
+
+`waitForEmptyJobQueue()` does two things at once:
+
+- **Waits** — it blocks (a barrier) until the job queue has drained and stayed
+  empty, so a later step doesn't start before ISPConfig has finished provisioning
+  the previous one.
+- **Reports** — while blocking it emits `progress`/`notice` events so the consumer
+  can render "what's happening and how long it's taking".
+
+Use it when building **complex, multi-step processes** — where one operation must
+be fully applied on the server before the next begins. It **returns** its summary
+array; the orchestrating script emits the single terminal `result` (via
+`emitResult()`). The standalone CLI `add`/`edit` commands here do **not** call it —
+check the job queue yourself afterwards with `./get_jobqueue_count.php` if you need
+to confirm provisioning finished.
+
+### Exit codes
+
+- `0` — the command produced a `result` line. Check its `success` field for the
+  operational outcome (a `get` that found nothing still exits `0` with
+  `success:true`).
+- `1` — a hard failure before/around producing a normal result: missing/invalid
+  arguments or an uncaught exception. These still emit a valid
+  `{"type":"result","success":false,"error":"…"}` line (via `failResult()`), so
+  the stream is valid NDJSON even on failure.
 
 ### `--help`
 
-Besides usage, it returns the default values for those scripts — the effective `--data` JSON, read live from ISPConfig's form definition (so it stays correct across updates) — which you can override with `--data='<json>'`.
+`--help` also emits a single `result` event whose `defaults` field holds the
+effective `--data` JSON — the script's defaults merged over ISPConfig's live form
+definition (read live so it stays correct across updates). Pretty-print it with
+`jq`:
+
+```bash
+./sites_database_add.php --help | jq .defaults
+```
+
+Any field shown can be overridden with `--data='<json>'`.
 
 ---
 
@@ -232,7 +352,7 @@ Creates a new web domain (website) in ISPConfig.
 - PHP-FPM enabled
 - HTTPS port: 443, HTTP port: 80
 - Subdomain: www
-- Daily backups, 2 copies
+- Backups disabled (`backup_interval: none`) — enable via `--data='{"backup_interval":"daily"}'`
 - Traffic/disk quota: unlimited (-1)
 
 Run `--help` to see the full effective default `--data` JSON. Any field can be
@@ -661,6 +781,133 @@ Retrieves information about all database users.
     "2": {
       "database_user_id": 2,
       "database_user": "c1user2",
+      ...
+    }
+  }
+}
+```
+
+---
+
+## Cron Management
+
+### sites_cron_add.php
+
+Creates a new cron job attached to a web domain.
+
+**Usage:**
+```bash
+./sites_cron_add.php --domain_id=<id> --command=<str> [--data='<json>']
+```
+
+**Example:**
+```bash
+# Shell command, daily at 02:00 (ISPConfig placeholders are expanded on the server)
+./sites_cron_add.php --domain_id=42 \
+  --command="cd {DOCROOT_CLIENT}/../private/bin/; {SITE_PHP} cron.php" \
+  --data='{"run_min":"0","run_hour":"2"}'
+
+# URL cron (wget-style) every minute
+./sites_cron_add.php --domain_id=42 \
+  --command="http://example.com/cron" \
+  --data='{"type":"url"}'
+```
+
+**Output:**
+```json
+{
+  "success": true,
+  "cron_id": 7,
+  "command": "cd {DOCROOT_CLIENT}/../private/bin/; {SITE_PHP} cron.php"
+}
+```
+
+**Required Parameters:**
+- `--domain_id`: Web domain ID the cron belongs to (used as parent_domain_id)
+- `--command`: Command to run (a shell command, or an http(s):// URL for `type=url`)
+
+**The `type` field:** unlike the web UI — which derives it automatically and hides
+it — the SOAP API does not, so you set it yourself. It controls how the command runs:
+
+| type       | how it runs                                          | command      |
+|------------|------------------------------------------------------|--------------|
+| `full`     | shell command as the web user, no chroot (default)   | shell        |
+| `chrooted` | shell command inside the site's jailkit chroot       | shell        |
+| `url`      | ISPConfig fetches the URL (wget-style)               | http(s):// URL |
+
+Override it via `--data='{"type":"url"}'`.
+
+**Default Configuration:**
+- Type: full
+- Schedule: every minute (`* * * * *`) — override the `run_min`/`run_hour`/`run_mday`/`run_month`/`run_wday` fields via `--data`
+- Active: yes
+
+---
+
+### sites_cron_get.php
+
+Retrieves information about a specific cron job by ID.
+
+**Usage:**
+```bash
+./sites_cron_get.php --id=<cron_id>
+```
+
+**Example:**
+```bash
+./sites_cron_get.php --id=7
+```
+
+**Output:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": 7,
+    "parent_domain_id": 42,
+    "type": "full",
+    "command": "cd {DOCROOT_CLIENT}/../private/bin/; {SITE_PHP} cron.php",
+    "run_min": "0",
+    "run_hour": "2",
+    "run_mday": "*",
+    "run_month": "*",
+    "run_wday": "*",
+    "active": "y",
+    ...
+  }
+}
+```
+
+**Required Parameters:**
+- `--id`: Cron ID (integer)
+
+---
+
+### sites_cron_get_all.php
+
+Retrieves information about all cron jobs in the system.
+
+**Usage:**
+```bash
+./sites_cron_get_all.php
+```
+
+**Output:**
+```json
+{
+  "success": true,
+  "count": 3,
+  "crons": {
+    "1": {
+      "id": 1,
+      "parent_domain_id": 26,
+      "type": "full",
+      ...
+    },
+    "2": {
+      "id": 2,
+      "parent_domain_id": 42,
+      "type": "url",
       ...
     }
   }
