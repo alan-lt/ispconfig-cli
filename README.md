@@ -81,7 +81,9 @@ machine-parseable without a "parser of a parser".
 
 ### Example stream
 
-A long-running command (creates the record, then waits for the job queue to drain):
+A multi-step process that waits for the job queue to drain between operations
+(via `waitForEmptyJobQueue()`) emits `progress`/`notice` while waiting, then the
+terminal `result`:
 
 ```
 {"type":"progress","jobs":3,"elapsed":2}
@@ -134,11 +136,27 @@ foreach (explode("\n", trim($output)) as $line) {
 ```
 
 When calling the library functions in-process, the same events are produced by
-`emitEvent()` / `emitResult()` in `soap_functions.php`. The wait functions
-(`waitForEmptyJobQueue`, `waitForEmptyJobQueue_v2`) emit the `progress`/`notice`
-lines and **return** their summary array; the calling script emits the single
-terminal `result` (via `emitResult()`), so there is always exactly one `result`
-line per command.
+`emitEvent()` / `emitResult()` in `soap_functions.php`.
+
+**Where `progress`/`notice` come from.** A plain command (an `add`, `edit`, `get`,
+`delete`) is synchronous: it performs its one API call and emits only the terminal
+`result` line — no `progress`. The `progress`/`notice` stream appears only when a
+process explicitly waits on the ISPConfig job queue via `waitForEmptyJobQueue()`.
+
+`waitForEmptyJobQueue()` does two things at once:
+
+- **Waits** — it blocks (a barrier) until the job queue has drained and stayed
+  empty, so a later step doesn't start before ISPConfig has finished provisioning
+  the previous one.
+- **Reports** — while blocking it emits `progress`/`notice` events so the consumer
+  can render "what's happening and how long it's taking".
+
+Use it when building **complex, multi-step processes** — where one operation must
+be fully applied on the server before the next begins. It **returns** its summary
+array; the orchestrating script emits the single terminal `result` (via
+`emitResult()`). The standalone CLI `add`/`edit` commands here do **not** call it —
+check the job queue yourself afterwards with `./get_jobqueue_count.php` if you need
+to confirm provisioning finished.
 
 ### Exit codes
 
@@ -334,7 +352,7 @@ Creates a new web domain (website) in ISPConfig.
 - PHP-FPM enabled
 - HTTPS port: 443, HTTP port: 80
 - Subdomain: www
-- Daily backups, 2 copies
+- Backups disabled (`backup_interval: none`) — enable via `--data='{"backup_interval":"daily"}'`
 - Traffic/disk quota: unlimited (-1)
 
 Run `--help` to see the full effective default `--data` JSON. Any field can be

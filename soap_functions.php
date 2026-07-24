@@ -880,7 +880,7 @@ function addCron($config) {
         $defaults = array(
             'server_id'        => 1,
             'parent_domain_id' => 0,
-            'type'             => 'url',
+            'type'             => 'full',
             'command'          => '',
             'run_min'          => '*',
             'run_hour'         => '*',
