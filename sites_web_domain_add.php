@@ -59,7 +59,7 @@ if (isset($arrArg['data'])) {
 // updates) with the settings above merged on top.
 if (isset($arrArg['help'])) {
 	$defaults = getFormDefaults('WEB_DOMAIN_TFORM');
-	emitEvent(array('type' => 'result', 'success' => true, 'defaults' => array_merge($defaults, $config)));
+	emitEvent(array('type' => 'result', 'success' => true, 'usage' => scriptUsage(), 'defaults' => array_merge($defaults, $config)));
 	exit(0);
 }
 

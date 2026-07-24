@@ -33,7 +33,7 @@ if (isset($arrArg['data'])) {
 
 // --help: ISPConfig's live form defaults with the settings above merged on top
 if (isset($arrArg['help'])) {
-	emitEvent(array('type' => 'result', 'success' => true, 'defaults' => array_merge(getFormDefaults('DATABASE_USER_TFORM'), $config)));
+	emitEvent(array('type' => 'result', 'success' => true, 'usage' => scriptUsage(), 'defaults' => array_merge(getFormDefaults('DATABASE_USER_TFORM'), $config)));
 	exit(0);
 }
 

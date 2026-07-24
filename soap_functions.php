@@ -87,6 +87,31 @@ function failResult($error, $extra = array()) {
     exit(1);
 }
 
+/**
+ * Read the leading block comment (the Usage/Options text) from the entry script.
+ *
+ * Lets --help carry the human-readable usage as the "usage" field of its result
+ * event, so the help stays on the NDJSON stream (read it with `jq -r .usage`)
+ * instead of being lost. The script's own top-of-file comment is the source of
+ * truth, so there is nothing to keep in sync.
+ *
+ * @return string Usage text, or '' if none found
+ */
+function scriptUsage() {
+    // The caller's file is the CLI entry script. We read it from the backtrace
+    // rather than $_SERVER['SCRIPT_FILENAME'], which the ISPConfig interface
+    // bootstrap (loaded via soap_env.php) clobbers.
+    $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1);
+    $file = isset($bt[0]['file']) ? $bt[0]['file'] : '';
+    if ($file === '' || !is_readable($file)) {
+        return '';
+    }
+    if (preg_match('#/\*(.*?)\*/#s', file_get_contents($file), $m)) {
+        return trim($m[1]);
+    }
+    return '';
+}
+
 
 
 

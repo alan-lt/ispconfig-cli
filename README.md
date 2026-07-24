@@ -170,16 +170,18 @@ to confirm provisioning finished.
 
 ### `--help`
 
-`--help` also emits a single `result` event whose `defaults` field holds the
-effective `--data` JSON — the script's defaults merged over ISPConfig's live form
-definition (read live so it stays correct across updates). Pretty-print it with
-`jq`:
+`--help` also emits a single `result` event with two fields:
+
+- `usage` — the human-readable usage/options text (what the command does, which
+  flags are required). Read it with `jq -r .usage`.
+- `defaults` — the effective `--data` JSON: the script's defaults merged over
+  ISPConfig's live form definition (read live so it stays correct across updates).
+  Any field shown can be overridden with `--data='<json>'`.
 
 ```bash
-./sites_database_add.php --help | jq .defaults
+./sites_database_add.php --help | jq -r .usage    # what/how to call it
+./sites_database_add.php --help | jq .defaults     # effective default fields
 ```
-
-Any field shown can be overridden with `--data='<json>'`.
 
 ---
 
