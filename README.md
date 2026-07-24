@@ -183,6 +183,20 @@ to confirm provisioning finished.
 ./sites_database_add.php --help | jq .defaults     # effective default fields
 ```
 
+`jq -r .usage` renders the usage text cleanly:
+
+```
+Usage:
+  ./sites_database_add.php --domain_id=<int> --database_name=<str> --database_user_id=<int> [--data='<json>']
+  ./sites_database_add.php --help
+
+Options:
+  --domain_id=<int>        (required) parent web domain id
+  --database_name=<str>    (required) database name
+  --database_user_id=<int> (required) database user id
+  --data='<json>'          override/extend the default settings below
+```
+
 ---
 
 ## System & API Information
