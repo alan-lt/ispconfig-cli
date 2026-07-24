@@ -15,7 +15,7 @@ require 'soap_functions.php';
 
 // --help: the fields (with ISPConfig's live defaults) that can be passed via --data
 if (isset($arrArg['help'])) {
-	emitEvent(array('type' => 'result', 'success' => true, 'defaults' => getFormDefaults('DATABASE_TFORM')));
+	emitEvent(array('type' => 'result', 'success' => true, 'usage' => scriptUsage(), 'defaults' => getFormDefaults('DATABASE_TFORM')));
 	exit(0);
 }
 
