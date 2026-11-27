@@ -1221,6 +1221,105 @@ function getAllWebDomains() {
 
 
 /**
+ * Sets the backup schedule of a web domain and all of its databases at once
+ *
+ * ISPConfig schedules web and database backups independently (web_domain and
+ * web_database each have their own backup_interval/backup_copies). This applies
+ * one setting to the domain and every database attached to it, so backups are
+ * all-or-nothing.
+ *
+ * @param string $domain_name Exact domain name
+ * @param string $interval none|daily|weekly|monthly
+ * @param mixed $copies Number of copies to keep (required unless $interval is 'none')
+ * @param int $client_id Client ID (default: 0)
+ * @return string JSON response
+ */
+function setBackup($domain_name, $interval, $copies = null, $client_id = 0) {
+    if (!in_array($interval, array('none', 'daily', 'weekly', 'monthly'), true)) {
+        return json_encode(array(
+            'success' => false,
+            'error' => 'interval must be one of: none, daily, weekly, monthly'
+        ));
+    }
+
+    if ($copies !== null && (!ctype_digit((string)$copies) || (int)$copies < 1)) {
+        return json_encode(array(
+            'success' => false,
+            'error' => 'copies must be a positive integer'
+        ));
+    }
+
+    if ($interval !== 'none' && $copies === null) {
+        return json_encode(array(
+            'success' => false,
+            'error' => 'copies is required when enabling backups'
+        ));
+    }
+
+    $updates = array('backup_interval' => $interval);
+    if ($copies !== null) {
+        $updates['backup_copies'] = (int)$copies;
+    }
+
+    $found = json_decode(getWebDomain(array('domain' => $domain_name)), true);
+    if (empty($found['success'])) {
+        return json_encode($found);
+    }
+
+    $domain = null;
+    foreach ($found['data'] as $record) {
+        if ($record['domain'] === $domain_name) {
+            $domain = $record;
+        }
+    }
+    if (!$domain) {
+        return json_encode(array(
+            'success' => false,
+            'error' => 'Domain not found'
+        ));
+    }
+    $domain_id = $domain['domain_id'];
+
+    $result = json_decode(updateWebDomain($domain_id, $updates, $client_id), true);
+    if (empty($result['success'])) {
+        return json_encode($result);
+    }
+
+    $all = json_decode(getAllDatabases(), true);
+    if (empty($all['success'])) {
+        return json_encode($all + array('domain_id' => $domain_id, 'web_updated' => true));
+    }
+
+    $databases = array();
+    foreach ($all['databases'] as $db) {
+        if ($db['parent_domain_id'] != $domain_id) {
+            continue;
+        }
+        $result = json_decode(updateDatabase($db['database_id'], $updates, $client_id), true);
+        if (empty($result['success'])) {
+            return json_encode($result + array(
+                'domain_id' => $domain_id,
+                'web_updated' => true,
+                'databases_updated' => $databases
+            ));
+        }
+        $databases[] = $db['database_name'];
+    }
+
+    return json_encode(array(
+        'success' => true,
+        'domain_id' => $domain_id,
+        'domain' => $domain_name,
+        'backup_interval' => $interval,
+        'backup_copies' => isset($updates['backup_copies']) ? $updates['backup_copies'] : (int)$domain['backup_copies'],
+        'databases' => $databases
+    ));
+}
+
+
+
+
+/**
  * Retrieves information about a web domain
  *
  * @param mixed $domain_id Domain ID (integer) or '-1' for all domains
