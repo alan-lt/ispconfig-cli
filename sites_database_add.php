@@ -11,6 +11,9 @@ Options:
   --database_name=<str>    (required) database name
   --database_user_id=<int> (required) database user id
   --data='<json>'          override/extend the default settings below
+
+backup_interval/backup_copies are inherited from the parent web domain
+(see sites_backup.php) unless given in --data.
 */
 
 require 'soap_functions.php';
@@ -23,8 +26,6 @@ $config = array(
 	'parent_domain_id'  => isset($arrArg['domain_id']) ? $arrArg['domain_id'] : '',
 	'database_name'     => isset($arrArg['database_name']) ? $arrArg['database_name'] : '',
 	'database_user_id'  => isset($arrArg['database_user_id']) ? $arrArg['database_user_id'] : '',
-	'backup_interval'   => 'daily',
-	'backup_copies'     => 2,
 	'active'            => 'y',
 );
 
@@ -55,6 +56,16 @@ if (!isset($arrArg['database_user_id'])) {
 
 try {
 	initISPConfig();
+
+	// Inherit the parent web domain's backup schedule so web and database backups stay in sync
+	$domain = json_decode(getWebDomain($arrArg['domain_id']), true);
+	if (empty($domain['success'])) {
+		failResult('Parent domain ' . $arrArg['domain_id'] . ' not found');
+	}
+	$config += array(
+		'backup_interval' => $domain['data']['backup_interval'],
+		'backup_copies'   => $domain['data']['backup_copies'],
+	);
 
 	$result = addDatabase($config);
 

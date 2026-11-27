@@ -35,6 +35,8 @@ Command-line interface tools for managing ISPConfig via SOAP API.
   - [sites_cron_add.php](#sites_cron_addphp) — create a cron job
   - [sites_cron_get.php](#sites_cron_getphp) — get cron job by ID
   - [sites_cron_get_all.php](#sites_cron_get_allphp) — list all cron jobs
+- **Backup Management**
+  - [sites_backup.php](#sites_backupphp) — enable/disable backups for a domain and its databases at once
 - **Web Server Config**
   - [directive_snippets_get_all.php](#directive_snippets_get_allphp) — list all directive snippets (apache/nginx/php templates)
   - [sites_web_domain_directive_snippet_set.php](#sites_web_domain_directive_snippet_setphp) — assign a directive snippet to a web domain
@@ -368,7 +370,7 @@ Creates a new web domain (website) in ISPConfig.
 - PHP-FPM enabled
 - HTTPS port: 443, HTTP port: 80
 - Subdomain: www
-- Backups disabled (`backup_interval: none`) — enable via `--data='{"backup_interval":"daily"}'`
+- Backups disabled (`backup_interval: none`) — enable with [`sites_backup.php`](#sites_backupphp)
 - Traffic/disk quota: unlimited (-1)
 
 Run `--help` to see the full effective default `--data` JSON. Any field can be
@@ -608,7 +610,7 @@ Creates a new MySQL database in ISPConfig.
 
 **Default Configuration:**
 - Database type: MySQL
-- Daily backups, 2 copies
+- Backups: inherited from the parent web domain (`backup_interval`, `backup_copies`)
 - Active: yes
 - Quota: unlimited (-1)
 
@@ -929,6 +931,55 @@ Retrieves information about all cron jobs in the system.
   }
 }
 ```
+
+---
+
+## Backup Management
+
+### sites_backup.php
+
+Enables or disables backups for a web domain **and all of its databases** in one
+command. ISPConfig schedules web and database backups independently
+(`web_domain.backup_interval` vs `web_database.backup_interval`), so changing only
+the domain leaves its databases backing up (and vice versa). This command applies
+the same interval/copies to both — backups are all-or-nothing.
+
+**Usage:**
+```bash
+./sites_backup.php --domain_name=<domain.tld> --interval=<daily|weekly|monthly> --copies=<int>
+./sites_backup.php --domain_name=<domain.tld> --interval=none
+```
+
+**Examples:**
+```bash
+# Enable: daily, keep 2 copies (files + all databases)
+./sites_backup.php --domain_name=example.com --interval=daily --copies=2
+
+# Disable everything
+./sites_backup.php --domain_name=example.com --interval=none
+```
+
+**Output:**
+```json
+{
+  "type": "result",
+  "success": true,
+  "domain_id": "42",
+  "domain": "example.com",
+  "backup_interval": "daily",
+  "backup_copies": 2,
+  "databases": ["exampledb"]
+}
+```
+
+**Required Parameters:**
+- `--domain_name`: Exact web domain name
+- `--interval`: `none`, `daily`, `weekly` or `monthly`
+- `--copies`: Number of copies to keep (required unless `--interval=none`)
+
+If a database update fails after the domain was updated, the result has
+`success:false` plus `web_updated` and `databases_updated` so you can see what
+was already changed; re-running the same command is safe.
 
 ---
 
